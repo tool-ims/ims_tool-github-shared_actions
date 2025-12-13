@@ -8,6 +8,9 @@ A complete, production-grade framework for automated **semantic versioning**, **
 1. [Overview](#overview)
 2. [Architecture Overview](#architecture-overview)
 3. [Semantic Versioning Rules](#semantic-versioning-rules)
+   - [Important Strict Syntax Enforcement](#important-strict-syntax-enforcement)
+   - [Examples](#examples)
+   - [Commit & PR Title Cheat Sheet](#commit--pr-title-cheat-sheet)
 4. [Precedence (important)](#precedence-important)
 5. [Skip CI Detection (title, body, commits)](#skip-ci-detection-title-body-commits)
 6. [Repo-Level Workflow (`repository-versioning.yml`)](#repo-level-workflow-repository-versioningyml)
@@ -32,7 +35,7 @@ It automatically:
 ## Architecture Overview
 
 ```
-┌────────────────────┐
+┌────────────────────┐ 
 │   Pull Request     │
 │      (merged)      │
 └─────────┬──────────┘
@@ -68,7 +71,7 @@ It automatically:
 
 ## Semantic Versioning Rules
 
-It follows below versioning pattern:
+It follows the standard semantic versioning pattern:
 
 ```
 MAJOR.MINOR.PATCH
@@ -77,22 +80,64 @@ MAJOR.MINOR.PATCH
 | Type of Change  |       Pattern        | Bump |
 |-----------------|----------------------|------|
 | Breaking Change | contains `BREAKING CHANGE` | **MAJOR** |
-| Breaking Syntax | `feat!:`, `refactor!:`, `type!:` or ending with `!` | **MAJOR** |
+| Breaking Syntax | `feat!:`, `refactor!:`, `type!:` (**no space before `:`**) or subject ending exactly with `!` | **MAJOR** |
 | Feature | `feat:` or `feat(` | **MINOR** |
 | Fix | `fix:` or `fix(` | **PATCH** |
 | Default | none matched | **PATCH** |
 
+### **Important (Strict Syntax Enforcement)**  
+> Breaking changes must be written **exactly** as `feat!:` (no space).
+>
+> ❌ `feat! : breaking change` → NOT detected as breaking  
+> ✅ `feat!: breaking change` → detected as breaking
+>
+> This strictness is intentional to avoid accidental MAJOR releases.
+> PR title and PR body are evaluated exactly like commit messages.  
+> Either can independently trigger **MAJOR / MINOR / PATCH** bumps.
+
+### Examples
+
+| Commit / PR title | Result |
+|------------------|--------|
+| `feat!: drop legacy API` | MAJOR |
+| `BREAKING CHANGE: config format updated` | MAJOR |
+| `refactor!: change request schema` | MAJOR |
+| `feat: add autoscaling support` | MINOR |
+| `fix: correct timeout bug` | PATCH |
+| `feat! : spacing mistake` | PATCH |
+| `docs: update README` | PATCH |
+
+### Commit & PR Title Cheat Sheet
+
+### MAJOR (Breaking)
+✅ `feat!: remove deprecated API`
+✅ `refactor!: change config structure`
+✅ `BREAKING CHANGE: auth token format changed`
+
+❌ `feat! : remove deprecated API` (space breaks detection)
+
+### MINOR (Feature)
+✅ `feat: add autoscaling support`
+✅ `feat(parser): support yaml input`
+
+### PATCH (Fix / Default)
+✅ `fix: correct timeout issue`
+✅ `docs: update README`
+✅ `chore: cleanup`
+
+> Notes: Versioning can be skipped entirely using skip-ci markers.  
+> See [Skip CI Detection (title, body, commits)](#skip-ci-detection-title-body-commits).
+
 ## Precedence (important)
 
+Precedence is evaluated across **all inputs combined** (PR title, PR body, and commit messages).
 ```
 MAJOR > MINOR > PATCH
 ```
 
-If ANY commit triggers MAJOR → MINOR/PATCH are ignored.
+If ANY input (PR title, PR body, or commit) triggers MAJOR → MINOR and PATCH are ignored.
 
 > **Notes:** Meaning, if any commit triggers MAJOR, MINOR/PATCH do not matter.
-
-
 
 ## Skip CI Detection (title, body, commits)
 
@@ -117,7 +162,7 @@ This workflow must be placed in each repository that needs auto‑versioning.
 It:
 - Prints initial context
 - Runs skip‑ci detection
-- If not skipped → runs composite action (stored in sharedservice repository)
+- If not skipped → runs composite action (stored in `tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning`)
 - Prints final summary
 
 
@@ -150,222 +195,223 @@ tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioni
 uses: ./.github/actions/repository-auto-versioning
 
 ```yml
-name: Repository_versioning
+  name: Repository_versioning
 
-on:
-  pull_request:
-    types: [closed]
+  on:
+    pull_request:
+      types: [closed]
 
-permissions:
-  contents: write
-  pull-requests: read
+  permissions:
+    contents: write
+    pull-requests: read
 
-jobs:
-  tag-and-version:
-    # Only run when the PR was merged
-    if: ${{ github.event.pull_request.merged == true }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout (full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # Initial Summary (ALWAYS RUNS)
-      - name: Initial run summary
-        id: initial_summary
-        shell: bash
-        run: |
-          REPO="${{ github.repository }}"
-          SERVER_URL="${{ github.server_url }}"
-          RUN_ID="${{ github.run_id }}"
-          RUN_NUMBER="${{ github.run_number }}"
-          EVENT_NAME="${{ github.event_name }}"
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          ACTOR="${{ github.actor }}"
-          HEAD_REF="${{ github.head_ref || '' }}"
-          BASE_REF="${{ github.base_ref || '' }}"
-          {
-            echo "## repository-auto-versioning — Initial Context"
-            echo "- Repository: ${REPO}"
-            echo "- Run: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID} (#${RUN_NUMBER})"
-            echo "- Trigger: ${EVENT_NAME}"
-            echo "- Actor: ${ACTOR}"
-            if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
-              echo "- PR: #${PR_NUMBER} (${HEAD_REF} → ${BASE_REF})"
-            fi
-            echo "- Next step: skip-ci detection"
-          } >> "$GITHUB_STEP_SUMMARY"
+  jobs:
+    tag-and-version:
+      # Only run when the PR was merged
+      if: ${{ github.event.pull_request.merged == true }}
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout (full)
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+        # Initial Summary (ALWAYS RUNS)
+        - name: Initial run summary
+          id: initial_summary
+          shell: bash
+          run: |
+            REPO="${{ github.repository }}"
+            SERVER_URL="${{ github.server_url }}"
+            RUN_ID="${{ github.run_id }}"
+            RUN_NUMBER="${{ github.run_number }}"
+            EVENT_NAME="${{ github.event_name }}"
+            PR_NUMBER="${{ github.event.pull_request.number || '' }}"
+            ACTOR="${{ github.actor }}"
+            HEAD_REF="${{ github.head_ref || '' }}"
+            BASE_REF="${{ github.base_ref || '' }}"
+            {
+              echo "## repository-auto-versioning — Initial Context"
+              echo "- Repository: ${REPO}"
+              echo "- Run: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID} (#${RUN_NUMBER})"
+              echo "- Trigger: ${EVENT_NAME}"
+              echo "- Actor: ${ACTOR}"
+              if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+                echo "- PR: #${PR_NUMBER} (${HEAD_REF} → ${BASE_REF})"
+              fi
+              echo "- Next step: skip-ci detection"
+            } >> "$GITHUB_STEP_SUMMARY"
 
-      # Full "Skip CI" detection (title/body/commits)
-      - name: Full Skip CI Check (title, body, commits)
-        id: check_skip
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          OWNER_REPO="${{ github.repository }}"
-          echo "Checking PR #${PR_NUMBER} for skip markers (title / body / commits)..."
+        # Full "Skip CI" detection (title/body/commits)
+        - name: Full Skip CI Check (title, body, commits)
+          id: check_skip
+          shell: bash
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            set -euo pipefail
+            PR_NUMBER="${{ github.event.pull_request.number || '' }}"
+            OWNER_REPO="${{ github.repository }}"
+            echo "Checking PR #${PR_NUMBER} for skip markers (title / body / commits)..."
 
-          contains_skip() {
-            # Accept common variants: [skip ci], skip-ci, skip_ci, skip ci (case-insensitive)
-            echo "$1" | grep -qiE '\[?skip[ _-]?ci\]?'
-          }
+            contains_skip() {
+              # Accept common variants: [skip ci], skip-ci, skip_ci, skip ci (case-insensitive)
+              echo "$1" | grep -qiE '\[?skip[ _-]?ci\]?'
+            }
 
-          # default outputs so step always has outputs
-          echo "skip=false" >> $GITHUB_OUTPUT
-          echo "skip_where=none" >> $GITHUB_OUTPUT
-          # Check PR title & body
-          if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
-            PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
-            PR_BODY=$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
-            echo "PR title: ${PR_TITLE}"
-            echo "PR body: (length) $(printf "%s" "$PR_BODY" | wc -c) chars"
+            # default outputs so step always has outputs
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip_where=none" >> $GITHUB_OUTPUT
+            # Check PR title & body
+            if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+              PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+              PR_BODY=$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+              echo "PR title: ${PR_TITLE}"
+              echo "PR body: (length) $(printf "%s" "$PR_BODY" | wc -c) chars"
 
-            if contains_skip "$PR_TITLE"; then
-              echo "Found skip marker in PR title."
-              echo "skip=true" >> $GITHUB_OUTPUT
-              echo "skip_where=title" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-
-            if contains_skip "$PR_BODY"; then
-              echo "Found skip marker in PR body."
-              echo "skip=true" >> $GITHUB_OUTPUT
-              echo "skip_where=body" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          fi
-
-          # Check each commit message in the PR using GitHub API
-          echo "Fetching commits for PR via GitHub API..."
-          commits_json=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/commits" || true)
-
-          # If API returned JSON array, inspect commit messages; otherwise warn and skip commit-level checks.
-          first_char="$(printf '%s' "$commits_json" | head -c 1 || echo '')"
-          if [ "$first_char" = "[" ]; then
-            printf '%s' "$commits_json" | jq -r '.[].commit.message' | while IFS= read -r msg; do
-              if contains_skip "$msg"; then
-                echo "Found skip marker in PR commit message"
+              if contains_skip "$PR_TITLE"; then
+                echo "Found skip marker in PR title."
                 echo "skip=true" >> $GITHUB_OUTPUT
-                echo "skip_where=commit" >> $GITHUB_OUTPUT
+                echo "skip_where=title" >> $GITHUB_OUTPUT
                 exit 0
               fi
-            done
-          else
-            echo "Warning: commits API returned non-array (or error). Skipping commit-level skip-ci detection."
-            echo "commits_api_head: ${commits_json:0:200}"
-          fi
 
-      # Skip Notice (if skip ci=true)
-      - name: Skip notice (when skip ci=true)
-        if: ${{ steps.check_skip.outputs.skip == 'true' }}
-        shell: bash
-        run: |
-          {
-            echo "## repository-auto-versioning — Skipped"
-            echo "- Reason: skip-ci marker detected"
-            echo "- Location: ${{ steps.check_skip.outputs.skip_where }}"
-            echo "- Composite action was not executed."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # Configure Git for private modules
-      - name: Configure Git for private modules
-        if: ${{ steps.check_skip.outputs.skip == 'false' }}
-        id: private_auth
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          private_status="missing"
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            # replace github.com with x-access-token URL so subsequent 'git' fetches can access private repos
-            git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-            private_status="configured"
-          fi
-          echo "private_git_auth=${private_status}" >> $GITHUB_OUTPUT
-
-      # Private auth summaries (success / failure)
-      - name: Private auth success summary
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
-        shell: bash
-        run: |
-          AUTH="${{ steps.private_auth.outputs.private_git_auth || 'unknown' }}"
-          {
-            echo "## repository-auto-versioning — Private Git config"
-            echo "- Private module auth: ${AUTH}"
-            echo "- Private auth step: succeeded"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Private auth failure summary
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome != 'success' }}
-        shell: bash
-        run: |
-          AUTH="${{ steps.private_auth.outputs.private_git_auth || 'missing' }}"
-          {
-            echo "## repository-auto-versioning — Private Git config"
-            echo "- Private module auth: ${AUTH}"
-            echo "- Private auth step: FAILED"
-            echo "- Note: Without configured private git auth, composite action may fail to fetch private modules or action code from other org repos."
-            echo "- Tip: ensure the `GITHUB_TOKEN` or a PAT secret is available and the workflow has permission to use it."
-          } >> "$GITHUB_STEP_SUMMARY"
-      # 5) Pre-call composite summary
-      - name: Pre-call summary for composite action repository-auto-version
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
-        shell: bash
-        run: |
-          {
-            echo "## repository-auto-versioning — Composite Start"
-            echo "- Action: ./.github/actions/repository-auto-versioning"
-            echo "- PR: #${{ github.event.pull_request.number }}"
-            # try get current version from repo file if exists
-            if [ -f version ]; then
-              echo "- Current version (repo file): $(cat version | tr -d '\r\n')"
-            else
-              echo "- Current version: unknown (no version file)"
+              if contains_skip "$PR_BODY"; then
+                echo "Found skip marker in PR body."
+                echo "skip=true" >> $GITHUB_OUTPUT
+                echo "skip_where=body" >> $GITHUB_OUTPUT
+                exit 0
+              fi
             fi
-            echo "- Next: running composite action to compute new version"
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Run composite repository-auto-versioning if NOT skipped and private_auth succeeded
-      - name: Run repository-auto-versioning
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
-        id: tagger
-        uses:  ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
-        with:
-          pr_number: ${{ github.event.pull_request.number }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          upload_logs: 'false'
 
-      # Repo-level result summary (on success of tagger)
-      - name: Repo-level result summary (on success)
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome == 'success' }}
-        shell: bash
-        run: |
-          TAG="${{ steps.tagger.outputs.new_version || '' }}"
-          {
-            echo "## repository-auto-versioning — Result"
-            echo "- Status: SUCCESS"
-            if [ -n "${TAG}" ]; then
-              echo "- Created tag: ${TAG}"
+            # Check each commit message in the PR using GitHub API
+            echo "Fetching commits for PR via GitHub API..."
+            commits_json=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/commits" || true)
+
+            # If API returned JSON array, inspect commit messages; otherwise warn and skip commit-level checks.
+            first_char="$(printf '%s' "$commits_json" | head -c 1 || echo '')"
+            if [ "$first_char" = "[" ]; then
+              printf '%s' "$commits_json" | jq -r '.[].commit.message' | while IFS= read -r msg; do
+                if contains_skip "$msg"; then
+                  echo "Found skip marker in PR commit message"
+                  echo "skip=true" >> $GITHUB_OUTPUT
+                  echo "skip_where=commit" >> $GITHUB_OUTPUT
+                  exit 0
+                fi
+              done
             else
-              echo "- No tag created (unexpected). Check composite action logs."
+              echo "Warning: commits API returned non-array (or error). Skipping commit-level skip-ci detection."
+              echo "commits_api_head: ${commits_json:0:200}"
             fi
-            echo "- Composite action appended detailed summary."
-            echo "- Tip: enable upload_logs: 'true' to capture /tmp/ci_versioning.log as an artifact for debugging."
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Repo-level result summary (on failure of tagger)
-      - name: Repo-level result summary (on failure)
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome != 'success' }}
-        shell: bash
-        run: |
-          {
-            echo "## repository-auto-versioning — Result"
-            echo "- Status: FAILED"
-            echo "- The repository-auto-versioning composite action failed. See the composite step logs for details."
-            echo "- Consider re-running with 'upload_logs: true' to capture debug artifact (/tmp/ci_versioning.log)."
-          } >> "$GITHUB_STEP_SUMMARY"
+
+        # Skip Notice (if skip ci=true)
+        - name: Skip notice (when skip ci=true)
+          if: ${{ steps.check_skip.outputs.skip == 'true' }}
+          shell: bash
+          run: |
+            {
+              echo "## repository-auto-versioning — Skipped"
+              echo "- Reason: skip-ci marker detected"
+              echo "- Location: ${{ steps.check_skip.outputs.skip_where }}"
+              echo "- Composite action was not executed."
+            } >> "$GITHUB_STEP_SUMMARY"
+
+        # Configure Git for private modules
+        - name: Configure Git for private modules
+          if: ${{ steps.check_skip.outputs.skip == 'false' }}
+          id: private_auth
+          shell: bash
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            set -euo pipefail
+            private_status="missing"
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              # replace github.com with x-access-token URL so subsequent 'git' fetches can access private repos
+              git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+              private_status="configured"
+            fi
+            echo "private_git_auth=${private_status}" >> $GITHUB_OUTPUT
+
+        # Private auth summaries (success / failure)
+        - name: Private auth success summary
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
+          shell: bash
+          run: |
+            AUTH="${{ steps.private_auth.outputs.private_git_auth || 'unknown' }}"
+            {
+              echo "## repository-auto-versioning — Private Git config"
+              echo "- Private module auth: ${AUTH}"
+              echo "- Private auth step: succeeded"
+            } >> "$GITHUB_STEP_SUMMARY"
+        - name: Private auth failure summary
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome != 'success' }}
+          shell: bash
+          run: |
+            AUTH="${{ steps.private_auth.outputs.private_git_auth || 'missing' }}"
+            {
+              echo "## repository-auto-versioning — Private Git config"
+              echo "- Private module auth: ${AUTH}"
+              echo "- Private auth step: FAILED"
+              echo "- Note: Without configured private git auth, composite action may fail to fetch private modules or action code from other org repos."
+              echo "- Tip: ensure the `GITHUB_TOKEN` or a PAT secret is available and the workflow has permission to use it."
+            } >> "$GITHUB_STEP_SUMMARY"
+        # 5) Pre-call composite summary
+        - name: Pre-call summary for composite action repository-auto-version
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
+          shell: bash
+          run: |
+            {
+              echo "## repository-auto-versioning — Composite Start"
+              echo "- Action: ./.github/actions/repository-auto-versioning"
+              echo "- PR: #${{ github.event.pull_request.number }}"
+              # try get current version from repo file if exists
+              if [ -f version ]; then
+                echo "- Current version (repo file): $(cat version | tr -d '\r\n')"
+              else
+                echo "- Current version: unknown (no version file)"
+              fi
+              echo "- Next: running composite action to compute new version"
+            } >> "$GITHUB_STEP_SUMMARY"
+        # Run composite repository-auto-versioning if NOT skipped and private_auth succeeded
+        - name: Run repository-auto-versioning
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
+          id: tagger
+          uses:  ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
+          with:
+            pr_number: ${{ github.event.pull_request.number }}
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+
+        # Repo-level result summary (on success of tagger)
+        - name: Repo-level result summary (on success)
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome == 'success' }}
+          shell: bash
+          run: |
+            TAG="${{ steps.tagger.outputs.new_version || '' }}"
+            UPDATE_TYPE="${{ steps.tagger.outputs.update_type || 'unknown' }}"
+            {
+              echo "## repository-auto-versioning — Result"
+              echo "- Status: SUCCESS"
+              if [ -n "${TAG}" ]; then
+                echo "- Created tag: ${TAG}"
+                echo "- Update type: ${UPDATE_TYPE}"
+              else
+                echo "- No tag created (unexpected). Check composite action logs."
+              fi
+              echo "- Composite action appended detailed summary."
+              echo "- Tip: enable upload_logs: 'true' to capture /tmp/ci_versioning.log as an artifact for debugging."
+            } >> "$GITHUB_STEP_SUMMARY"
+        # Repo-level result summary (on failure of tagger)
+        - name: Repo-level result summary (on failure)
+          if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome != 'success' }}
+          shell: bash
+          run: |
+            {
+              echo "## repository-auto-versioning — Result"
+              echo "- Status: FAILED"
+              echo "- The repository-auto-versioning composite action failed. See the composite step logs for details."
+              echo "- Consider re-running with 'upload_logs: true' to capture debug artifact (/tmp/ci_versioning.log)."
+            } >> "$GITHUB_STEP_SUMMARY"
 ```
 
 
@@ -397,25 +443,24 @@ author: "Tooling Team"
 
 inputs:
   github_token:
-    description: "GitHub token (optional). Defaults to secrets.GITHUB_TOKEN"
-    required: false
+    description: "GitHub token (required). Pass secrets.GITHUB_TOKEN from caller workflow."
+    required: true
   pr_number:
     description: "Pull Request number (required)."
     required: true
-  upload_logs:
-    description: "If 'true', upload detailed logs as an artifact for debugging (default false)."
-    required: false
-    default: "false"
 
 outputs:
   new_version:
     description: "Annotated tag created (vX.Y.Z)"
     value: ${{ steps.release.outputs.new_version }}
+  update_type:
+    description: "Type of version bump (major/minor/patch)"
+    value: ${{ steps.run_update.outputs.computed_update_type }}
 
 runs:
   using: composite
   steps:
-    - name: Checkout repository (target)
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
@@ -441,7 +486,7 @@ runs:
           latest_tag=$(git describe --tags --abbrev=0)
           current="${latest_tag#v}"
         elif [ -f version ]; then
-          current=$(cat version)
+          current=$(cat version | tr -d '\r\n')
         else
           current="0.0.0"
         fi
@@ -452,7 +497,7 @@ runs:
       id: gather
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token || secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
         PR="${{ inputs.pr_number }}"
@@ -460,32 +505,58 @@ runs:
         echo "PR_NUMBER=${PR}" > "${OUT}"
         echo "###COMMIT###" >> "${OUT}"
 
+        # include PR title/body from event payload if available
         if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
           PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
           PR_BODY=$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
           if [ -n "$PR_TITLE" ]; then
-            echo "$PR_TITLE" >> "${OUT}"
+            echo "$PR_TITLE" >> "${OUT}";
             echo "###COMMIT###" >> "${OUT}"
           fi
           if [ -n "$PR_BODY" ]; then
-            echo "$PR_BODY" >> "${OUT}"
+            echo "$PR_BODY" >> "${OUT}";
             echo "###COMMIT###" >> "${OUT}"
           fi
         fi
 
         OWNER_REPO="${GITHUB_REPOSITORY}"
-        commits_json=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" || true)
+        TMP_RESP="$(mktemp)"
+        HTTP_STATUS=0
 
-        # write each commit.message to OUT
-        echo "$commits_json" | jq -r '.[].commit.message' | while IFS= read -r msg; do
-          [ -z "$msg" ] && continue
-          echo "$msg" >> "${OUT}"
-          echo "###COMMIT###" >> "${OUT}"
-        done
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          HTTP_STATUS=$(curl -sS -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -w "%{http_code}" \
+            "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true)
+        else
+          curl -sS -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true
+          HTTP_STATUS=0
+        fi
 
+        # Parse only when response looks like JSON array
+        RESP_FIRST_CHAR="$(head -c 1 "${TMP_RESP}" 2>/dev/null || echo "")"
+        if [ -n "${HTTP_STATUS}" ] && [ "${HTTP_STATUS}" -ge 200 ] && [ "${HTTP_STATUS}" -lt 300 ] && [ "${RESP_FIRST_CHAR}" = "[" ]; then
+          jq -r '.[].commit.message' "${TMP_RESP}" | while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            echo "$msg" >> "${OUT}"
+            echo "###COMMIT###" >> "${OUT}"
+          done
+        else
+          # fallback: log response for debugging; try best-effort extraction if valid JSON
+          echo "WARNING: commits API unexpected (HTTP=${HTTP_STATUS})" > /tmp/ci_versioning_gather.log
+          head -c 2048 "${TMP_RESP}" >> /tmp/ci_versioning_gather.log 2>/dev/null || true
+          if jq -e '.[0].commit.message' "${TMP_RESP}" >/dev/null 2>&1; then
+            jq -r '.[].commit.message' "${TMP_RESP}" | while IFS= read -r msg; do
+              [ -z "$msg" ] && continue
+              echo "$msg" >> "${OUT}"
+              echo "###COMMIT###" >> "${OUT}"
+            done
+          else
+            echo "No commits parsed from API; proceeding with PR title/body only (see /tmp/ci_versioning_gather.log)" >> /tmp/ci_versioning_gather.log
+          fi
+        fi
+
+        rm -f "${TMP_RESP}" || true
         echo "commits_file=${OUT}" >> $GITHUB_OUTPUT
+        echo "gather_log=/tmp/ci_versioning_gather.log" >> $GITHUB_OUTPUT
 
     - name: Initialize log file
       id: init_log
@@ -497,13 +568,14 @@ runs:
         echo "pr=${{ inputs.pr_number }}" >> "${LOG}"
         echo "current=${{ steps.latest.outputs.current }}" >> "${LOG}"
         echo "commits_file=${{ steps.gather.outputs.commits_file }}" >> "${LOG}"
+        echo "gather_log=${{ steps.gather.outputs.gather_log }}" >> "${LOG}"
         echo "log_file=${LOG}" >> $GITHUB_OUTPUT
 
     - name: Run updateVersion script (bundled) with logging
       id: run_update
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token || secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
         LOG="${{ steps.init_log.outputs.log_file }}"
@@ -523,23 +595,32 @@ runs:
         # final semver is printed to stdout by the script (guaranteed).
         STDOUT="$("$SCRIPT" "$CURRENT" "$COMMITS_FILE" 2>>"${LOG}")" || ( echo "updateVersion.sh failed; check ${LOG}" | tee -a "${LOG}" >&2; exit 1 )
 
-        # Append stdout (should be just the semver line) to the log as well for traceability
+        # Append script stdout (should be just the semver line) to the log as well for traceability
         printf '%s\n' "${STDOUT}" >> "${LOG}"
+        # Remove empty lines
+        CLEAN="$(printf '%s\n' "${STDOUT}" | sed '/^[[:space:]]*$/d')"
 
-        # Use last line of STDOUT as computed version (defensive)
-        NEW="$(printf '%s\n' "${STDOUT}" | tail -n1 | tr -d '\r')"
-
-        if [ -z "$NEW" ]; then
+        # Last line = version
+        NEW_VERSION="$(printf '%s\n' "${CLEAN}" | tail -n1 | tr -d '\r')"
+        # Second last line = update type (UPDATE_TYPE=xxx)
+        UPDATE_LINE="$(printf '%s\n' "${CLEAN}" | tail -n2 | head -n1)"
+        UPDATE_TYPE="$(printf '%s' "${UPDATE_LINE}" | sed -E 's/^UPDATE_TYPE=//')"
+        case "${UPDATE_TYPE}" in
+          major|minor|patch) ;;
+          *) UPDATE_TYPE="patch" ;;
+        esac
+        if [ -z "$NEW_VERSION" ]; then
           echo "Failed to compute new version; check ${LOG}" | tee -a "${LOG}" >&2
           exit 1
         fi
-        echo "computed_new_version=${NEW}" >> $GITHUB_OUTPUT
+        echo "computed_new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "computed_update_type=${UPDATE_TYPE:-unknown}" >> $GITHUB_OUTPUT
 
     - name: Commit CHANGELOG and version, create annotated tag
       id: release
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token || secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
         LOG="${{ steps.init_log.outputs.log_file }}"
@@ -550,15 +631,17 @@ runs:
         TAG="v${NEW}"
 
         git add CHANGELOG.md version || true
-
         if git diff --cached --quiet; then
           echo "No changes to commit" | tee -a "${LOG}"
         else
           git commit -m "chore(release): ${TAG} [skip ci]" || echo "No commit created" | tee -a "${LOG}"
         fi
 
+        # ensure push uses provided token
+        GIT_AUTH_TOKEN="${{ inputs.github_token }}"
+        REPO_URL="https://x-access-token:${GIT_AUTH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
         git tag -a "${TAG}" -m "Version ${NEW}"
-        if git push origin "${TAG}"; then
+        if git push "${REPO_URL}" "${TAG}"; then
           echo "Pushed ${TAG}" | tee -a "${LOG}"
         else
           echo "Tag push failed; attempting retry with incremented patch" | tee -a "${LOG}"
@@ -568,21 +651,14 @@ runs:
           pa=$((pa + 1))
           retry_tag="v${ma}.${mi}.${pa}"
           git tag -a "${retry_tag}" -m "Version ${retry_tag} (retry)"
-          git push origin "${retry_tag}"
+          git push "${REPO_URL}" "${retry_tag}"
           TAG="${retry_tag}"
         fi
 
-        # Push commit (may fail due to branch protection; that's expected in some orgs)
-        git push origin HEAD:main || echo "Push of commit failed (permissions or branch protection)" | tee -a "${LOG}"
+        # push commit back to main (may fail due to branch protection)
+        git push "${REPO_URL}" "HEAD:main" || echo "Push of commit failed (permissions or branch protection)" | tee -a "${LOG}"
 
         echo "new_version=${TAG}" >> $GITHUB_OUTPUT
-
-    - name: Upload logs (optional)
-      if: ${{ inputs.upload_logs == 'true' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: versioning-log-${{ inputs.pr_number }}-${{ steps.run_update.outputs.computed_new_version }}
-        path: /tmp/ci_versioning.log
 ```
 
 ## Version Update Script
@@ -607,16 +683,17 @@ set -euo pipefail
 # Usage: ./updateVersion.sh <current_version> <commits_file>
 # - current_version: "X.Y.Z" or "vX.Y.Z"
 # - commits_file: path containing PR title/body and commit messages separated by "###COMMIT###"
-#
-# Behavior:
-# - Implements SemVer: MAJOR.MINOR.PATCH
+# Behaviour:
+# - Implements SemVer rules: MAJOR.MINOR.PATCH
 # - BREAKING CHANGE or '!' -> MAJOR
 # - feat: -> MINOR
 # - fix: -> PATCH
 # - Precedence: MAJOR > MINOR > PATCH
-# - Prepends CHANGELOG.md with: "## vX.Y.Z" and list of commit subjects
-# - Writes version file as X.Y.Z (no leading v)
-# - Last stdout line = new version
+# - Prepends CHANGELOG.md with "## vX.Y.Z" and list of commit subjects
+# - Writes 'version' file with X.Y.Z (no leading v)
+# - Outputs two important lines to stdout:
+#    1) UPDATE_TYPE=<major|minor|patch>
+#    2) X.Y.Z   <- final line (machine-readable new version)
 
 if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <current_version> <commits_file>" >&2
@@ -671,10 +748,10 @@ for e in "${ENTRIES[@]}"; do
     printf '  -> BREAKING CHANGE detected\n' >&2
   fi
 
-  # Conventional '!' breaking (feat!:, refactor!:, etc)
+  # Conventional '!' breaking (feat!:, refactor!:, or trailing '!')
   if printf '%s' "$subject" | grep -qE '^[a-zA-Z0-9]+(\([^)]+\))?!:|!$'; then
     bump_major=1
-    printf '  -> \"!\" breaking change detected\n' >&2
+    printf '  -> "!" breaking change detected\n' >&2
   fi
 
   # feat -> MINOR (only if no major)
@@ -700,21 +777,25 @@ printf 'Bump flags → major=%s minor=%s patch=%s\n' "$bump_major" "$bump_minor"
 
 # Determine bump type
 if [ "$bump_major" -eq 1 ]; then
+  TYPE="major"
   NEW_MAJ=$((CUR_MAJ + 1))
   NEW_MIN=0
   NEW_PAT=0
   printf 'Applying MAJOR bump\n' >&2
 elif [ "$bump_minor" -eq 1 ]; then
+  TYPE="minor"
   NEW_MAJ="$CUR_MAJ"
   NEW_MIN=$((CUR_MIN + 1))
   NEW_PAT=0
   printf 'Applying MINOR bump\n' >&2
 elif [ "$bump_patch" -eq 1 ]; then
+  TYPE="patch"
   NEW_MAJ="$CUR_MAJ"
   NEW_MIN="$CUR_MIN"
   NEW_PAT=$((CUR_PATCH + 1))
   printf 'Applying PATCH bump\n' >&2
 else
+  TYPE="patch"
   NEW_MAJ="$CUR_MAJ"
   NEW_MIN="$CUR_MIN"
   NEW_PAT=$((CUR_PATCH + 1))
@@ -752,7 +833,10 @@ printf 'version file updated → %s\n' "$NEW_VERSION" >&2
 
 printf '[%s] updateVersion.sh completed\n' "$(date --iso-8601=seconds)" >&2
 
-# FINAL OUTPUT → machine-readable semantic version
+# OUTPUT (two lines):
+# 1) UPDATE_TYPE=...
+# 2) X.Y.Z   (final machine-readable semver)
+printf 'UPDATE_TYPE=%s\n' "$TYPE"
 printf '%s\n' "$NEW_VERSION"
 ```
 
@@ -794,7 +878,6 @@ Check:
 ### 3. Branch protection blocks commit?
 Ensure bot has push permission.
 
-
 ## FAQ
 
 ### 1. Does this work for any repository?
@@ -820,3 +903,8 @@ skip ci
 ```
 ### 4. Does it work with existing tags?
 Yes — automatically picks the latest semantic tag.
+
+### 5. Why did `feat! : Composite action development` result in PATCH?
+
+Because breaking syntax must be written **exactly** as `feat!:` (no space).  
+`feat! :` does not match the breaking-change pattern and is ignored.

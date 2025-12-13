@@ -1,0 +1,94 @@
+name: Terraform Plan (Destroy)
+description: Compute destroy plan for a given environment and upload artifacts. Assumes init was run by terraform-setup and AWS credentials configured by the caller.
+author: Terraform Tooling Team
+inputs:
+  working_directory:
+    description: Directory containing Terraform configuration.
+    required: false
+    default: "."
+  environment:
+    description: Environment name (sandbox/dev/prod) used to derive var-file path
+    required: true
+
+outputs:
+  plan_status:
+    description: Result of terraform plan -destroy (changes, no_changes).
+    value: ${{ steps.plan.outputs.plan_status }}
+  plan_exit_code:
+    description: Exit code returned by terraform plan -destroy (0 or 2).
+    value: ${{ steps.plan.outputs.plan_exit_code }}
+  plan_file:
+    description: Path to the generated destroy plan file.
+    value: ${{ steps.plan.outputs.plan_file }}
+  plan_text_path:
+    description: Path to the rendered destroy plan text file.
+    value: ${{ steps.capture.outputs.plan_text_path }}
+  plan_json_path:
+    description: Path to the rendered destroy plan JSON file.
+    value: ${{ steps.capture.outputs.plan_json_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Terraform plan (destroy)
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        ENV_NAME="${{ inputs.environment }}"
+        PLAN_FILE="destroy-plan-${ENV_NAME}.tfplan"
+        set +e
+        terraform plan -destroy -input=false -no-color -detailed-exitcode -out="$PLAN_FILE" -var-file="env/${ENV_NAME}/${ENV_NAME}.tfvars"
+        ec=$?
+        if [ $ec -eq 0 ] || [ $ec -eq 2 ]; then
+          status=$([ $ec -eq 2 ] && echo changes || echo no_changes)
+          echo "plan_status=$status" >> "$GITHUB_OUTPUT"
+          echo "plan_exit_code=$ec" >> "$GITHUB_OUTPUT"
+          echo "plan_file=$(pwd)/$PLAN_FILE" >> "$GITHUB_OUTPUT"
+          exit 0
+        else
+          exit $ec
+        fi
+
+    - name: Capture plan outputs
+      id: capture
+      if: ${{ success() }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+        ENV_NAME="${{ inputs.environment }}"
+        PLAN_FILE="destroy-plan-${ENV_NAME}.tfplan"
+        terraform show -no-color "$PLAN_FILE" > destroy-plan.txt
+        terraform show -json "$PLAN_FILE" > destroy-plan.json
+        echo "plan_text_path=$(pwd)/destroy-plan.txt" >> "$GITHUB_OUTPUT"
+        echo "plan_json_path=$(pwd)/destroy-plan.json" >> "$GITHUB_OUTPUT"
+
+    - name: Publish destroy plan summary
+      if: ${{ success() }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        ENV_NAME="${{ inputs.environment }}"
+        {
+          echo "### Terraform destroy plan (${ENV_NAME})"
+          echo
+          echo "<details><summary>View destroy plan</summary>"
+          echo
+          echo '<pre>'
+          cat destroy-plan.txt
+          echo '</pre>'
+          echo
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload destroy plan artifact
+      if: ${{ steps.plan.outputs.plan_file != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: tfdestroy-plan
+        path: |
+          ${{ steps.plan.outputs.plan_file }}
+          ${{ steps.capture.outputs.plan_text_path }}
+          ${{ steps.capture.outputs.plan_json_path }}
+        if-no-files-found: ignore

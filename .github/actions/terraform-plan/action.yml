@@ -1,0 +1,93 @@
+name: Terraform Plan
+description: Compute backend/plan paths from environment and run terraform plan with artifacts. Assumes AWS credentials configured by the caller.
+author: Terraform Tooling Team
+inputs:
+  working_directory:
+    description: Directory containing Terraform configuration.
+    required: false
+    default: "."
+  environment:
+    description: Environment name (sandbox/dev/prod) used to derive backend/plan paths and role
+    required: true
+  
+outputs:
+  plan_status:
+    description: Result of terraform plan (changes, no_changes).
+    value: ${{ steps.plan.outputs.plan_status }}
+  plan_exit_code:
+    description: Exit code returned by terraform plan (useful with -detailed-exitcode).
+    value: ${{ steps.plan.outputs.plan_exit_code }}
+  plan_file:
+    description: Path to the generated plan file.
+    value: ${{ steps.plan.outputs.plan_file }}
+  plan_text_path:
+    description: Path to the rendered human-readable plan file.
+    value: ${{ steps.capture.outputs.plan_text_path }}
+  plan_json_path:
+    description: Path to the rendered JSON plan file (empty when disabled).
+    value: ${{ steps.capture.outputs.plan_json_path }}
+runs:
+  using: composite
+  steps:
+    - name: Terraform plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        ENV_NAME="${{ inputs.environment }}"
+        PLAN_FILE="plan-${ENV_NAME}.tfplan"
+        set +e
+        terraform plan -input=false -no-color -detailed-exitcode -out="$PLAN_FILE" -var-file="env/${ENV_NAME}/${ENV_NAME}.tfvars"
+        ec=$?
+        if [ $ec -eq 0 ] || [ $ec -eq 2 ]; then
+          status=$([ $ec -eq 2 ] && echo changes || echo no_changes)
+          echo "plan_status=$status" >> "$GITHUB_OUTPUT"
+          echo "plan_exit_code=$ec" >> "$GITHUB_OUTPUT"
+          echo "plan_file=$(pwd)/$PLAN_FILE" >> "$GITHUB_OUTPUT"
+          exit 0
+        else
+          exit $ec
+        fi
+
+    - name: Capture plan outputs
+      id: capture
+      if: ${{ success() }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+        ENV_NAME="${{ inputs.environment }}"
+        PLAN_FILE="plan-${ENV_NAME}.tfplan"
+        terraform show -no-color "$PLAN_FILE" > plan.txt
+        terraform show -json "$PLAN_FILE" > plan.json
+        echo "plan_text_path=$(pwd)/plan.txt" >> "$GITHUB_OUTPUT"
+        echo "plan_json_path=$(pwd)/plan.json" >> "$GITHUB_OUTPUT"
+
+    - name: Publish plan summary
+      if: ${{ success() }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        ENV_NAME="${{ inputs.environment }}"
+        {
+          echo "### Terraform plan (${ENV_NAME})"
+          echo
+          echo "<details><summary>View plan</summary>"
+          echo
+          echo '<pre>'
+          cat plan.txt
+          echo '</pre>'
+          echo
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload plan artifact
+      if: ${{ steps.plan.outputs.plan_file != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: tfplan
+        path: |
+          ${{ steps.plan.outputs.plan_file }}
+          ${{ steps.capture.outputs.plan_text_path }}
+          ${{ steps.capture.outputs.plan_json_path }}
+        if-no-files-found: ignore

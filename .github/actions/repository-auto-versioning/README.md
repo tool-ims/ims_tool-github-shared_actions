@@ -358,7 +358,7 @@ jobs:
         run: |
           {
             echo "## repository-auto-versioning — Composite Start"
-            echo "- Action: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning"
+            echo "- Action: ./.github/actions/repository-auto-versioning"
             echo "- PR: #${{ github.event.pull_request.number }}"
             # try get current version from repo file if exists
             if [ -f version ]; then
@@ -372,7 +372,7 @@ jobs:
       - name: Run repository-auto-versioning
         if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
         id: tagger
-        uses: .github/actions/repository-auto-versioning/action.yml    # <- replace with your published composite action@tag
+        uses:  ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
         # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
         with:
           pr_number: ${{ github.event.pull_request.number }}

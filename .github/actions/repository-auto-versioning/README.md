@@ -187,7 +187,7 @@ tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioni
 ```
 2. if composite action is in same repo as workflow
 
-uses: ./.github/actions/repository-auto-versioning
+uses: .github/actions/repository-auto-versioning
 
 ```yml
 name: Repository_versioning
@@ -372,7 +372,7 @@ jobs:
       - name: Run repository-auto-versioning
         if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
         id: tagger
-        uses: /.github/actions/repository-auto-versioning    # <- replace with your published composite action@tag
+        uses: .github/actions/repository-auto-versioning    # <- replace with your published composite action@tag
         # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
         with:
           pr_number: ${{ github.event.pull_request.number }}

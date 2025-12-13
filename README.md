@@ -143,7 +143,7 @@ Designed to be reusable across Terraform modules, application repos, and infra r
 	-	Works best when PRs are labeled (major, minor, patch) or follow conventional commits
 
 - Docs:
-  For detailed behavior and examples, see [terraform repository versioning README](.github/actions/terraform-destroy/README.md)
+  For detailed behavior and examples, see [terraform repository versioning README](.github/actions/repository-auto-versioning/README.md)
 
 ## Reusable Workflows
 

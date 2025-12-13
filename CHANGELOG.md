@@ -1,3 +1,10 @@
+## v1.0.0
+
+- PR_NUMBER=2
+- feat!: updated workflow and composite action
+- updated workflow and composite action
+- updated workflow and composite action
+
 ## v0.0.1
 
 - PR_NUMBER=1

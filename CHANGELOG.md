@@ -1,3 +1,9 @@
+## v1.0.1
+
+- PR_NUMBER=3
+- fixed typo
+- fixed typo
+
 ## v1.0.0
 
 - PR_NUMBER=2

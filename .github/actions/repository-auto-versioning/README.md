@@ -169,26 +169,59 @@ Example to use composite action in repo level workflow:
 
 **Format**: uses: `<owner>/<repo>[/<path-to-action>]@<ref>`
 
+Where:
+	- <owner> = GitHub org or user
+  - <repo> = repository containing the composite action
+  - <path-to-action> = path where action.yml exists
+  - <ref> = branch, tag, or SHA (subject to GitHub security rules)
+
 Example: 
-1. if composite actions is shared from other git org/repo:
+1. If the composite action repository is in the same GitHub org and allowed by org policy:
 
-uses: my-org/shared-repo/.github/actions/repository-auto-versioning@v1.0.0  --> points to tag v1.0.0
-uses: my-org/shared-repo/.github/actions/repository-auto-versioning@main    --> main branch
+Branch references (not recommended for production)
 
-with branch name:
-
+```yml
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@main
 ```
-tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@main
-```
-with version tag name:
 
+Tag-based references (recommended)
+```yml
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1.0.0
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1
 ```
-tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1.0.0
+
+2. Composite Action in the Same Repository
+If the workflow and composite action live in the same repo:
+
+```yml
+uses: ./.github/actions/repository-auto-versioning
 ```
-2. if composite action is in same repo as workflow
 
-uses: .github/actions/repository-auto-versioning/action.yml
+3. Composite Action from a Different Organization (Cross-Org):
+When consuming a composite action from another GitHub org, GitHub security rules apply.
 
+✅ Allowed
+```yml
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1.1.0
+```
+
+❌ Not allowed
+
+```yml
+uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@main
+```
+
+When you are using Github composite action from git respotiory from cross-org, only @tag can be used. @main will not work because of GitHub security feature.
+
+Why @main does NOT work cross-org
+- GitHub blocks mutable references (branches) from external orgs
+- Only immutable refs are allowed:
+  - Version tags (v0.1.0)
+  - Floating major tags (v0, v1)
+  - Full commit SHAs
+
+## complete workflow
 ```yml
 name: Repository_versioning
 

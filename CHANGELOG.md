@@ -1,3 +1,9 @@
+## v1.0.2
+
+- PR_NUMBER=7
+- updated path
+- updated path
+
 ## v1.0.1
 
 - PR_NUMBER=3

@@ -1,0 +1,79 @@
+name: Terraform Setup
+description: >-
+  Prepare a repository for Terraform execution: configure Git for private modules,
+  install Terraform, run fmt/validate, and invoke tfsec (always on).
+author: Terraform Tooling Team
+inputs:
+  terraform_version:
+    description: Terraform CLI version to install.
+    required: false
+    default: "1.8.5"
+  environment:
+    description: Environment name (used to select backend config file at env/<env>/<env>.tfbackend)
+    required: true
+  working_directory:
+    description: Directory containing Terraform configuration.
+    required: false
+    default: "."
+runs:
+  using: composite
+  steps:
+    - name: Configure Git for private modules
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        fi
+
+    - name: Render backend config
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        ENV_NAME: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        TEMPLATE_PATH="env/tfbackend.template"
+        if [ ! -f "$TEMPLATE_PATH" ]; then
+          echo "Backend template not found: $TEMPLATE_PATH" >&2
+          exit 1
+        fi
+        OUT_DIR="env/${ENV_NAME}"
+        mkdir -p "$OUT_DIR"
+        OUT_FILE="${OUT_DIR}/${ENV_NAME}.tfbackend"
+        # Expose the selected environment for templates
+        export environment="$ENV_NAME"
+        if command -v envsubst >/dev/null 2>&1; then
+          envsubst < "$TEMPLATE_PATH" > "$OUT_FILE"
+        else
+          cp "$TEMPLATE_PATH" "$OUT_FILE"
+        fi
+        echo "Rendered backend to $OUT_FILE"
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+
+    - name: Terraform fmt check
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform fmt -check -diff
+
+    - name: Terraform init (backend)
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform init -input=false -reconfigure -backend-config="env/${{ inputs.environment }}/${{ inputs.environment }}.tfbackend"
+
+    - name: Terraform validate
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform validate -no-color
+
+    - name: Run tfsec
+      uses: aquasecurity/tfsec-pr-commenter-action@v1.3.1
+      with:
+        tfsec_args: --soft-fail --minimum-severity high
+        github_token: ${{ github.token }}

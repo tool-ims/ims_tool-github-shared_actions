@@ -1,0 +1,222 @@
+name: "repository-auto-versioning"
+description: "Compute semver from PR commits, update CHANGELOG/version, create annotated tag vX.Y.Z and push."
+author: "Tooling Team"
+
+inputs:
+  github_token:
+    description: "GitHub token (required). Pass secrets.GITHUB_TOKEN from caller workflow."
+    required: true
+  pr_number:
+    description: "Pull Request number (required)."
+    required: true
+
+outputs:
+  new_version:
+    description: "Annotated tag created (vX.Y.Z)"
+    value: ${{ steps.release.outputs.new_version }}
+  update_type:
+    description: "Type of version bump (major/minor/patch)"
+    value: ${{ steps.run_update.outputs.computed_update_type }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Require PR number
+      id: require_pr
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.pr_number }}" ] || [ "${{ inputs.pr_number }}" = "null" ]; then
+          echo "Error: pr_number input is required for this action."
+          exit 1
+        fi
+        echo "pr_number=${{ inputs.pr_number }}" >> $GITHUB_OUTPUT
+
+    - name: Determine current version
+      id: latest
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch --tags --no-recurse-submodules || true
+        latest_tag=""
+        if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+          latest_tag=$(git describe --tags --abbrev=0)
+          current="${latest_tag#v}"
+        elif [ -f version ]; then
+          current=$(cat version | tr -d '\r\n')
+        else
+          current="0.0.0"
+        fi
+        echo "latest_tag=${latest_tag:-}" >> $GITHUB_OUTPUT
+        echo "current=${current}" >> $GITHUB_OUTPUT
+
+    - name: Gather PR title/body and commit messages
+      id: gather
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        PR="${{ inputs.pr_number }}"
+        OUT="$(mktemp /tmp/commits.XXXXXX)"
+        echo "PR_NUMBER=${PR}" > "${OUT}"
+        echo "###COMMIT###" >> "${OUT}"
+
+        # include PR title/body from event payload if available
+        if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+          PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+          PR_BODY=$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+          if [ -n "$PR_TITLE" ]; then
+            echo "$PR_TITLE" >> "${OUT}";
+            echo "###COMMIT###" >> "${OUT}"
+          fi
+          if [ -n "$PR_BODY" ]; then
+            echo "$PR_BODY" >> "${OUT}";
+            echo "###COMMIT###" >> "${OUT}"
+          fi
+        fi
+
+        OWNER_REPO="${GITHUB_REPOSITORY}"
+        TMP_RESP="$(mktemp)"
+        HTTP_STATUS=0
+
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          HTTP_STATUS=$(curl -sS -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -w "%{http_code}" \
+            "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true)
+        else
+          curl -sS -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true
+          HTTP_STATUS=0
+        fi
+
+        # Parse only when response looks like JSON array
+        RESP_FIRST_CHAR="$(head -c 1 "${TMP_RESP}" 2>/dev/null || echo "")"
+        if [ -n "${HTTP_STATUS}" ] && [ "${HTTP_STATUS}" -ge 200 ] && [ "${HTTP_STATUS}" -lt 300 ] && [ "${RESP_FIRST_CHAR}" = "[" ]; then
+          jq -r '.[].commit.message' "${TMP_RESP}" | while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            echo "$msg" >> "${OUT}"
+            echo "###COMMIT###" >> "${OUT}"
+          done
+        else
+          # fallback: log response for debugging; try best-effort extraction if valid JSON
+          echo "WARNING: commits API unexpected (HTTP=${HTTP_STATUS})" > /tmp/ci_versioning_gather.log
+          head -c 2048 "${TMP_RESP}" >> /tmp/ci_versioning_gather.log 2>/dev/null || true
+          if jq -e '.[0].commit.message' "${TMP_RESP}" >/dev/null 2>&1; then
+            jq -r '.[].commit.message' "${TMP_RESP}" | while IFS= read -r msg; do
+              [ -z "$msg" ] && continue
+              echo "$msg" >> "${OUT}"
+              echo "###COMMIT###" >> "${OUT}"
+            done
+          else
+            echo "No commits parsed from API; proceeding with PR title/body only (see /tmp/ci_versioning_gather.log)" >> /tmp/ci_versioning_gather.log
+          fi
+        fi
+
+        rm -f "${TMP_RESP}" || true
+        echo "commits_file=${OUT}" >> $GITHUB_OUTPUT
+        echo "gather_log=/tmp/ci_versioning_gather.log" >> $GITHUB_OUTPUT
+
+    - name: Initialize log file
+      id: init_log
+      shell: bash
+      run: |
+        LOG="/tmp/ci_versioning.log"
+        echo "==== CI Versioning Log ====" > "${LOG}"
+        echo "repo=${GITHUB_REPOSITORY}" >> "${LOG}"
+        echo "pr=${{ inputs.pr_number }}" >> "${LOG}"
+        echo "current=${{ steps.latest.outputs.current }}" >> "${LOG}"
+        echo "commits_file=${{ steps.gather.outputs.commits_file }}" >> "${LOG}"
+        echo "gather_log=${{ steps.gather.outputs.gather_log }}" >> "${LOG}"
+        echo "log_file=${LOG}" >> $GITHUB_OUTPUT
+
+    - name: Run updateVersion script (bundled) with logging
+      id: run_update
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        LOG="${{ steps.init_log.outputs.log_file }}"
+        COMMITS_FILE="${{ steps.gather.outputs.commits_file }}"
+        CURRENT="${{ steps.latest.outputs.current }}"
+        SCRIPT="$GITHUB_ACTION_PATH/scripts/updateVersion.sh"
+
+        if [ ! -f "$SCRIPT" ]; then
+          echo "Error: bundled script not found at $SCRIPT" | tee -a "${LOG}" >&2
+          exit 1
+        fi
+        chmod +x "$SCRIPT" || true
+
+        echo "Running script: $SCRIPT $CURRENT $COMMITS_FILE" | tee -a "${LOG}"
+
+        # Capture stdout of script separately and send stderr to log; diagnostics go to stderr in script,
+        # final semver is printed to stdout by the script (guaranteed).
+        STDOUT="$("$SCRIPT" "$CURRENT" "$COMMITS_FILE" 2>>"${LOG}")" || ( echo "updateVersion.sh failed; check ${LOG}" | tee -a "${LOG}" >&2; exit 1 )
+
+        # Append script stdout (should be just the semver line) to the log as well for traceability
+        printf '%s\n' "${STDOUT}" >> "${LOG}"
+        # Remove empty lines
+        CLEAN="$(printf '%s\n' "${STDOUT}" | sed '/^[[:space:]]*$/d')"
+
+        # Last line = version
+        NEW_VERSION="$(printf '%s\n' "${CLEAN}" | tail -n1 | tr -d '\r')"
+        # Second last line = update type (UPDATE_TYPE=xxx)
+        UPDATE_LINE="$(printf '%s\n' "${CLEAN}" | tail -n2 | head -n1)"
+        UPDATE_TYPE="$(printf '%s' "${UPDATE_LINE}" | sed -E 's/^UPDATE_TYPE=//')"
+        case "${UPDATE_TYPE}" in
+          major|minor|patch) ;;
+          *) UPDATE_TYPE="patch" ;;
+        esac
+        if [ -z "$NEW_VERSION" ]; then
+          echo "Failed to compute new version; check ${LOG}" | tee -a "${LOG}" >&2
+          exit 1
+        fi
+        echo "computed_new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "computed_update_type=${UPDATE_TYPE:-unknown}" >> $GITHUB_OUTPUT
+
+    - name: Commit CHANGELOG and version, create annotated tag
+      id: release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        LOG="${{ steps.init_log.outputs.log_file }}"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.ghe.com"
+
+        NEW="${{ steps.run_update.outputs.computed_new_version }}"
+        TAG="v${NEW}"
+
+        git add CHANGELOG.md version || true
+        if git diff --cached --quiet; then
+          echo "No changes to commit" | tee -a "${LOG}"
+        else
+          git commit -m "chore(release): ${TAG} [skip ci]" || echo "No commit created" | tee -a "${LOG}"
+        fi
+
+        # ensure push uses provided token
+        GIT_AUTH_TOKEN="${{ inputs.github_token }}"
+        REPO_URL="https://x-access-token:${GIT_AUTH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git tag -a "${TAG}" -m "Version ${NEW}"
+        if git push "${REPO_URL}" "${TAG}"; then
+          echo "Pushed ${TAG}" | tee -a "${LOG}"
+        else
+          echo "Tag push failed; attempting retry with incremented patch" | tee -a "${LOG}"
+          git fetch --tags --no-recurse-submodules || true
+          latest_tag_now=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          IFS='.' read -r ma mi pa <<< "${latest_tag_now#v}"
+          pa=$((pa + 1))
+          retry_tag="v${ma}.${mi}.${pa}"
+          git tag -a "${retry_tag}" -m "Version ${retry_tag} (retry)"
+          git push "${REPO_URL}" "${retry_tag}"
+          TAG="${retry_tag}"
+        fi
+
+        # push commit back to main (may fail due to branch protection)
+        git push "${REPO_URL}" "HEAD:main" || echo "Push of commit failed (permissions or branch protection)" | tee -a "${LOG}"
+
+        echo "new_version=${TAG}" >> $GITHUB_OUTPUT

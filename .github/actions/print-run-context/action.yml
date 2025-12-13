@@ -1,0 +1,146 @@
+name: Print Run Context
+description: Append a human-readable summary of key inputs and GitHub run context to the step summary.
+author: Terraform Tooling Team
+
+inputs:
+  title:
+    description: Title to use for the summary section
+    required: false
+    default: Run Context
+  environment:
+    description: Target environment name
+    required: false
+    default: ""
+  aws_account_id:
+    description: AWS account ID in use
+    required: false
+    default: ""
+  aws_role_arn:
+    description: Effective AWS role ARN in use
+    required: false
+    default: ""
+  working_directory:
+    description: Terraform working directory (if applicable)
+    required: false
+    default: ""
+  backend_config_file:
+    description: Terraform backend config file (if applicable)
+    required: false
+    default: ""
+  var_file:
+    description: Terraform var file (if applicable)
+    required: false
+    default: ""
+  plan_file:
+    description: Terraform plan file name (if applicable)
+    required: false
+    default: ""
+  terraform_version:
+    description: Terraform CLI version (if applicable)
+    required: false
+    default: ""
+  go_version:
+    description: Go version for Terratest (if applicable)
+    required: false
+    default: ""
+  terratest_working_directory:
+    description: Terratest working directory (if applicable)
+    required: false
+    default: ""
+  terratest_pattern:
+    description: Terratest pattern or 'all' (if applicable)
+    required: false
+    default: ""
+  terratest_timeout:
+    description: Terratest timeout (if applicable)
+    required: false
+    default: ""
+  application:
+    description: Application or module name
+    required: false
+    default: ""
+  action_type:
+    description: Action type (e.g., plan, apply, bootstrap)
+    required: false
+    default: ""
+  region:
+    description: AWS region
+    required: false
+    default: "eu-west-1"
+  notes:
+    description: Additional free-form notes to include in the summary
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Append summary
+      shell: bash
+      env:
+        TITLE: ${{ inputs.title }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+        AWS_ROLE_ARN: ${{ inputs.aws_role_arn }}
+        WORKDIR: ${{ inputs.working_directory }}
+        BACKEND: ${{ inputs.backend_config_file }}
+        VAR_FILE: ${{ inputs.var_file }}
+        PLAN_FILE: ${{ inputs.plan_file }}
+        TF_VERSION: ${{ inputs.terraform_version }}
+        GO_VERSION: ${{ inputs.go_version }}
+        TEST_DIR: ${{ inputs.terratest_working_directory }}
+        TEST_PATTERN: ${{ inputs.terratest_pattern }}
+        TEST_TIMEOUT: ${{ inputs.terratest_timeout }}
+        NOTES: ${{ inputs.notes }}
+        EVENT_NAME: ${{ github.event_name }}
+        ACTOR: ${{ github.actor }}
+        TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        REF: ${{ github.ref }}
+        WORKFLOW: ${{ github.workflow }}
+        RUN_NUMBER: ${{ github.run_number }}
+        RUN_ID: ${{ github.run_id }}
+        REPOSITORY: ${{ github.repository }}
+        SERVER_URL: ${{ github.server_url }}
+        HEAD_REF: ${{ github.head_ref }}
+        BASE_REF: ${{ github.base_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        APP: ${{ inputs.application }}
+        ACTION_TYPE: ${{ inputs.action_type }}
+        REGION: ${{ inputs.region }}
+      run: |
+        {
+          echo "## ${TITLE}"
+          echo "- Repository: ${REPOSITORY}"
+          echo "- Run: ${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID} (#${RUN_NUMBER})"
+          echo "- Trigger: ${EVENT_NAME}"
+          echo "- Actor: ${ACTOR} (triggering: ${TRIGGERING_ACTOR})"
+          echo "- Ref: ${REF}"
+          echo "- Action: ${ACTION_TYPE:-n/a}"
+          [ -n "${APP}" ] && echo "- Application: ${APP}"
+          if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_NUMBER}" ]; then
+            echo "- PR: #${PR_NUMBER} from ${HEAD_REF} into ${BASE_REF}"
+          fi
+          if [ -n "${ENVIRONMENT}${AWS_ACCOUNT_ID}${AWS_ROLE_ARN}" ]; then
+            echo "- Environment: ${ENVIRONMENT}"
+            [ -n "${AWS_ACCOUNT_ID}" ] && echo "- AWS account id: ${AWS_ACCOUNT_ID}"
+            [ -n "${AWS_ROLE_ARN}" ] && echo "- AWS role ARN: ${AWS_ROLE_ARN}"
+          fi
+          if [ -n "${WORKDIR}" ]; then
+            echo "- Working dir: ${WORKDIR}"
+          fi
+          if [ -n "${TF_VERSION}${BACKEND}${VAR_FILE}${PLAN_FILE}" ]; then
+            echo "- Terraform: version=${TF_VERSION:-n/a}"
+            [ -n "${BACKEND}" ] && echo "  - Backend: ${BACKEND}"
+            [ -n "${VAR_FILE}" ] && echo "  - Var file: ${VAR_FILE}"
+            [ -n "${PLAN_FILE}" ] && echo "  - Plan file: ${PLAN_FILE}"
+          fi
+          if [ -n "${GO_VERSION}${TEST_DIR}${TEST_PATTERN}${TEST_TIMEOUT}" ]; then
+            echo "- Terratest: go=${GO_VERSION} dir=${TEST_DIR} pattern=${TEST_PATTERN} timeout=${TEST_TIMEOUT}"
+          fi
+          if [ -n "${APP}${ACTION_TYPE}${REGION}" ]; then
+            echo "- Context: app=${APP:-n/a} action=${ACTION_TYPE:-n/a} region=${REGION:-n/a}"
+          fi
+          if [ -n "${NOTES}" ]; then
+            echo "- Notes: ${NOTES}"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

@@ -165,20 +165,15 @@ It:
 - If not skipped → runs composite action (stored in `tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning`)
 - Prints final summary
 
-
-complete workflow: **repository-versioning.yml**
-
 Example to use composite action in repo level workflow:
 
-**Format**: uses: <owner>/<repo>[/<path-to-action>]@<ref> 
+**Format**: uses: `<owner>/<repo>[/<path-to-action>]@<ref>`
 
 Example: 
 1. if composite actions is shared from other git org/repo:
 
 uses: my-org/shared-repo/.github/actions/repository-auto-versioning@v1.0.0  --> points to tag v1.0.0
 uses: my-org/shared-repo/.github/actions/repository-auto-versioning@main    --> main branch
-
-Example:
 
 with branch name:
 

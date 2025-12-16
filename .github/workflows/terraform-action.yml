@@ -3,38 +3,93 @@ name: Terraform Module
 on:
   workflow_call:
     inputs:
-      working_directory:
-        description: Path to the Terraform module root.
+      workload_tower:
+        description: Workload tower (tu, int, cust, sec, coll, comm, fin)
+        required: true
+        type: string
+      application:
+        description: Application, service, or module name
         required: true
         type: string
       environment:
-        description: Environment name used for backend/vars, approvals and role resolution.
+        description: Environment (dev, tst, ppe, prd)
         required: true
         type: string
-      action:
-        description: Which action to perform (plan or apply)
+      sub_environment:
+        description: >
+          Encoded sub-environment.
+          prd → prb | prg
+          ppe → ppb | ppg
+          tst → sta | stb
         required: false
         type: string
+      region:
+        description: Execution or deployment region
+        required: true
+        type: string
+        default: "eu-west-1"
+      working_directory:
+        description: Terraform module directory
+        required: true
+        type: string
+      action:
+        description: Terraform action
+        required: true
+        type: string
         default: apply
+      backend_config_file:
+        description: Backend config file (relative to working_directory)
+        required: true
+        type: string
+      var_file:
+        description: Optional tfvars file (relative to working directory)
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
-      working_directory:
-        description: Path to the Terraform module root.
+      workload_tower:
+        description: Workload tower (tu, int, cust, sec, coll, comm, fin)
         required: true
         default: "."
-      environment:
-        description: Environment name (drives backend/vars/plan/approval/role)
-        required: true
-        default: "prod"
-      action:
-        description: Which action to perform (plan, apply, destroy)
-        required: true
-        default: apply
         type: choice
-        options:
-          - plan
-          - apply
-          - destroy
+        options: [tu, int, cust, sec, coll, comm, fin]
+      application:
+        description: Application, service, or module name
+        required: true
+        default: ""
+      environment:
+        description: Environment (dev, tst, ppe, prd)
+        required: true
+        type: choice
+        options: [dev, tst, ppe, prd]
+      sub_environment:
+        description: >
+          Encoded sub-environment.
+          prd → prb | prg
+          ppe → ppb | ppg
+          tst → sta | stb
+        required: false
+        default: ""
+      region:
+        description: Execution or deployment region
+        required: true
+        default: "eu-west-1"
+      working_directory:
+        description: Terraform module directory
+        required: true
+      action:
+        description: Terraform action
+        required: true
+        type: choice
+        options: [plan, apply, plan-destroy, apply-destroy]
+      backend_config_file:
+        description: Backend config file (relative to working_directory)
+        required: true
+        default: ""
+      var_file:
+        description: Optional tfvars file (relative to working directory)
+        required: true
+        default: ""
 
 permissions:
   contents: read
@@ -44,53 +99,48 @@ concurrency:
   group: terraform-${{ inputs.working_directory }}-${{ github.ref }}
   cancel-in-progress: false
 
+# --------------------------------------------------
+# PLAN (runs for plan + apply)
+# --------------------------------------------------
 jobs:
   plan:
     name: Plan
-    if: ${{ inputs.action != 'destroy' }}
+    if: ${{ inputs.action == 'plan' || inputs.action == 'apply' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    env:
-      TF_VERSION: '1.8.5'
-      AWS_REGION: eu-west-1
-      TF_ENVIRONMENT: ${{ inputs.environment }}
-      TF_DIR: ${{ inputs.working_directory }}
     defaults:
       run:
         working-directory: ${{ inputs.working_directory }}
     outputs:
-      changed: ${{ steps.plan.outputs.plan_status == 'changes' }}
+      plan_status: ${{ steps.plan.outputs.plan_status }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Summarise inputs
+      - name: Print run context
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@main
         with:
-          title: Terraform Module Workflow Context
+          title: Terraform plan
+          workload_tower: ${{ inputs.workload_tower }}
           environment: ${{ inputs.environment }}
-          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          aws_role_arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
+          sub_environment: ${{ inputs.sub_environment }}
+          application: ${{ inputs.application }}
+          action: plan
+          region: ${{ inputs.region }}
           working_directory: ${{ inputs.working_directory }}
-          var_file: env/${{ inputs.environment }}/${{ inputs.environment }}.tfvars
-          plan_file: plan-${{ inputs.environment }}.tfplan
-          terraform_version: 1.8.5
-          action_type: ${{ inputs.action }}
-          application: ${{ inputs.working_directory }}
-          notes: "Reusable Terraform Module Workflow"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: AWS authentication (OIDC)
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/aws-auth-oidc@main
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
-          aws-region: eu-west-1
-          role-session-name: github-actions
+          target_account_id: ${{ steps.account.outputs.account_id }}
+          tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          region: ${{ inputs.region }}
 
       - name: Terraform setup
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-setup@main
         with:
-          environment: ${{ inputs.environment }}
           working_directory: ${{ inputs.working_directory }}
+          backend_config_file: ${{ inputs.backend_config_file }}
 
       - name: Terraform plan
         id: plan
@@ -98,141 +148,159 @@ jobs:
         with:
           working_directory: ${{ inputs.working_directory }}
           environment: ${{ inputs.environment }}
+          var_file: ${{ inputs.var_file }}
 
-      # PR comment step removed per request
-
-  plan-approval:
-    name: Plan Approval Gate
-    if: ${{ inputs.action == 'apply' }}
-    runs-on: ubuntu-latest
-    needs: [plan]
-    environment: ${{ format('{0}-deploy', inputs.environment) }}
-    steps:
-      - name: Await environment approval
-        run: echo "Awaiting approval in environment '${{ format('{0}-deploy', inputs.environment) }}'"
-
+# --------------------------------------------------
+# APPLY (ONLY IF CHANGES + WITH APPROVAL GATE)
+# --------------------------------------------------
   apply:
-    name: Apply
-    if: ${{ inputs.action == 'apply' }}
+    if: >
+      ${{
+        inputs.action == 'apply' &&
+        needs.plan.outputs.plan_status == 'changes'
+      }}
+    needs: plan
     runs-on: ubuntu-latest
-    needs: [plan, plan-approval]
-    environment: ${{ inputs.environment }}
-    env:
-      TF_VERSION: '1.8.5'
-      AWS_REGION: eu-west-1
-      TF_ENVIRONMENT: ${{ inputs.environment }}
-      TF_DIR: ${{ inputs.working_directory }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
+    # Approval gate using GitHub Environments
+    environment: ${{ format('{0}-deploy', inputs.environment) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Print run context
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@main
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
-          aws-region: eu-west-1
-          role-session-name: github-actions
+          title: Terraform apply
+          workload_tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          sub_environment: ${{ inputs.sub_environment }}
+          application: ${{ inputs.application }}
+          action: apply
+          region: ${{ inputs.region }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: AWS authentication (OIDC)
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/aws-auth-oidc@main
+        with:
+          target_account_id: ${{ steps.account.outputs.account_id }}
+          tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          region: ${{ inputs.region }}
 
       - name: Terraform setup
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-setup@main
         with:
-          environment: ${{ inputs.environment }}
           working_directory: ${{ inputs.working_directory }}
+          backend_config_file: ${{ inputs.backend_config_file }}
+
+      - name: Download Terraform plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ inputs.working_directory }}
 
       - name: Terraform apply
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-apply@main
         with:
           working_directory: ${{ inputs.working_directory }}
-          environment: ${{ inputs.environment }}
+          plan_file: ${{ inputs.working_directory }}/plan-${{ inputs.environment }}.tfplan
 
+# --------------------------------------------------
+# PLAN DESTROY
+# --------------------------------------------------
   plan-destroy:
-    name: Plan Destroy
-    if: ${{ inputs.action == 'destroy' }}
+    if: ${{ inputs.action == 'plan-destroy' || inputs.action == 'apply-destroy' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
+    outputs:
+      plan_status: ${{ steps.plan.outputs.plan_status }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Summarise inputs
+      - name: Print run context
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@main
         with:
-          title: Terraform Module Workflow Context
+          title: Terraform destroy plan
+          workload_tower: ${{ inputs.workload_tower }}
           environment: ${{ inputs.environment }}
-          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
-          aws_role_arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
+          sub_environment: ${{ inputs.sub_environment }}
+          application: ${{ inputs.application }}
+          action: plan-destroy
+          region: ${{ inputs.region }}
           working_directory: ${{ inputs.working_directory }}
-          var_file: env/${{ inputs.environment }}/${{ inputs.environment }}.tfvars
-          plan_file: destroy-plan-${{ inputs.environment }}.tfplan
-          terraform_version: 1.8.5
-          action_type: ${{ inputs.action }}
-          application: ${{ inputs.working_directory }}
-          notes: "Reusable Terraform Module Workflow"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: AWS authentication (OIDC)
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/aws-auth-oidc@main
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
-          aws-region: eu-west-1
-          role-session-name: github-actions
+          target_account_id: ${{ steps.account.outputs.account_id }}
+          tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          region: ${{ inputs.region }}
 
       - name: Terraform setup
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-setup@main
         with:
-          environment: ${{ inputs.environment }}
           working_directory: ${{ inputs.working_directory }}
+          backend_config_file: ${{ inputs.backend_config_file }}
 
-      - name: Terraform plan (destroy)
-        id: destroy_plan
+      - name: Terraform plan destroy
+        id: plan
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-plan-destroy@main
         with:
           working_directory: ${{ inputs.working_directory }}
           environment: ${{ inputs.environment }}
+          var_file: ${{ inputs.var_file }}
 
-  destroy-approval:
-    name: Destroy Approval Gate
-    if: ${{ inputs.action == 'destroy' }}
+# --------------------------------------------------
+# APPLY DESTROY (ONLY IF CHANGES + APPROVAL GATE)
+# --------------------------------------------------
+  apply-destroy:
+    if: >
+      ${{
+        inputs.action == 'apply-destroy' &&
+        needs.plan-destroy.outputs.plan_status == 'changes'
+      }}
+    needs: plan-destroy
     runs-on: ubuntu-latest
-    needs: [plan-destroy]
     environment: ${{ format('{0}-deploy', inputs.environment) }}
-    steps:
-      - name: Await environment approval
-        run: echo "Awaiting approval in environment '${{ format('{0}-deploy', inputs.environment) }}'"
-
-  destroy:
-    name: Destroy
-    if: ${{ inputs.action == 'destroy' }}
-    runs-on: ubuntu-latest
-    needs: [plan-destroy, destroy-approval]
-    environment: ${{ inputs.environment }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Print run context
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@main
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ims-terraform-infrastructure-role-${{ inputs.environment }}
-          aws-region: eu-west-1
-          role-session-name: github-actions
+          title: Terraform destroy apply
+          workload_tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          sub_environment: ${{ inputs.sub_environment }}
+          application: ${{ inputs.application }}
+          action: destroy
+          region: ${{ inputs.region }}
+          working_directory: ${{ inputs.working_directory }}
+
+      - name: AWS authentication (OIDC)
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/aws-auth-oidc@main
+        with:
+          target_account_id: ${{ steps.account.outputs.account_id }}
+          tower: ${{ inputs.workload_tower }}
+          environment: ${{ inputs.environment }}
+          region: ${{ inputs.region }}
 
       - name: Terraform setup
         uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-setup@main
         with:
-          environment: ${{ inputs.environment }}
           working_directory: ${{ inputs.working_directory }}
+          backend_config_file: ${{ inputs.backend_config_file }}
 
-      - name: Terraform destroy
-        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-destroy@main
+      - name: Download Terraform destroy plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: destroy-plan-${{ inputs.environment }}-${{ github.run_id }}
+          path: ${{ inputs.working_directory }}
+
+      - name: Terraform apply destroy
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-apply-destroy@main
         with:
           working_directory: ${{ inputs.working_directory }}
-          environment: ${{ inputs.environment }}
+          plan_file: ${{ inputs.working_directory }}/destroy-plan-${{ inputs.environment }}.tfplan

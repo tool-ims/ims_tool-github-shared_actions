@@ -1,181 +1,272 @@
-# GitHub Composite Actions
+# Platform GitHub Composite Actions
 
-Reusable GitHub composite actions maintained by the Tooling team to standardise Terraform workflows across repositories.
+This repository contains **production-grade GitHub composite actions** used to standardise
+**Terraform infrastructure workflows**, **application pipelines**, and **repository governance** across the organisation.
+
+The actions are designed around **clear responsibility boundaries**, **deterministic execution**,
+and **enterprise-safe approval and versioning patterns**.
 
 ---
 
 ## Table of Contents
 
-- [Composite Actions](#composite-actions)
-  - [terraform-setup](#githubactionsterraform-setup)
-  - [print-run-context](#githubactionsprint-run-context)
-  - [terraform-plan](#githubactionsterraform-plan)
-  - [terraform-plan-destroy](#githubactionsterraform-plan-destroy)
-  - [terraform-apply](#githubactionsterraform-apply)
-  - [terraform-destroy](#githubactionsterraform-destroy)
-  - [repository-auto-versioning](#githubactionsrepository-auto-versioning)
-- [Reusable Workflows](#reusable-workflows)
-- [Requirements](#requirements)
-- [Versioning](#versioning)
+This Table of Contents reflects the public contract of the platform actions.
+
+1. [Design Principles](#design-principles)
+2. [Action Catalog](#action-catalog)
+   - [print-run-context](#print-run-context)
+   - [aws-auth-oidc](#aws-auth-oidc)
+   - [terraform-setup](#terraform-setup)
+   - [terraform-plan](#terraform-plan)
+   - [terraform-plan-destroy](#terraform-plan-destroy)
+   - [terraform-apply](#terraform-apply)
+   - [terraform-apply-destroy](#terraform-apply-destroy)
+   - [repository-auto-versioning](#repository-auto-versioning)
+3. [Recommended Workflow Patterns](#recommended-workflow-patterns)
+4. [Security Posture](#security-posture)
+5. [How to Consume These Actions](#how-to-consume-these-actions)
+6. [Versioning & Governance](#versioning--governance)
+7. [Repository Structure](#repository-structure)
+8. [Ownership](#ownership)
 
 ---
 
-## Composite Actions
+## Design Principles
 
-### `.github/actions/terraform-setup`
+All actions in this repository follow these principles:
 
-Bootstrap Terraform repositories: configure private module access, install Terraform, run `fmt` / `validate`, and run `tfsec` (always on).
+- **Single responsibility** per action
+- **Caller-owned configuration**
+- **Deterministic execution** (plan → apply symmetry)
+- **Approval only for state-changing operations**
+- **Tool-agnostic and reusable**
+- **Repository versioning treated as governance, not pipelines**
+- **No long-lived secrets**
+- **Audit-friendly by default**
 
-```yaml
-- uses: actions/checkout@v4
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-setup@main
-  with:
-    terraform_version: 1.8.5 # optional; defaults to 1.8.5
+---
+
+## Action Catalog
+
+### print-run-context
+
+**Purpose:**  
+Prints a human-readable summary of workflow inputs and GitHub execution context
+to the GitHub Step Summary.
+
+**Typical usage:**  
+First step in *every* workflow (infra, app, scan, deploy, versioning).
+
+---
+
+### aws-auth-oidc
+
+**Purpose:**  
+Authenticates GitHub Actions to AWS using **OIDC** (no static credentials).
+
+**Typical usage:**  
+Before any Terraform or AWS-dependent step.
+
+---
+
+### terraform-setup
+
+**Purpose:**  
+Prepares a repository for Terraform execution.
+
+**Responsibilities:**
+- Git configuration for private modules
+- `terraform fmt`
+- `terraform init`
+- `terraform validate`
+
+---
+
+### terraform-plan
+
+**Purpose:**  
+Generates a Terraform plan and publishes artifacts and summaries.
+
+---
+
+### terraform-plan-destroy
+
+**Purpose:**  
+Generates an explicit Terraform **destroy plan**.
+
+---
+
+### terraform-apply
+
+**Purpose:**  
+Applies a **previously reviewed Terraform plan**.
+
+---
+
+### terraform-apply-destroy
+
+**Purpose:**  
+Applies a **previously reviewed Terraform destroy plan**.
+
+---
+
+### repository-auto-versioning
+
+**Purpose:**  
+Provides a reusable composite action for **automated semantic versioning**, **CHANGELOG generation**, and **annotated Git tag creation** on every Pull Request.
+
+**Important distinction:**  
+This is a **repository-governance composite action**.  
+It is **not executed inside CI/CD pipelines** such as build, scan, deploy, or Terraform workflows.
+
+**What it does:**
+- Determines current version (Git tag → `version` file → `0.0.0`)
+- Collects PR title, PR body, and commit messages
+- Applies strict semantic versioning rules
+- Updates `CHANGELOG.md` and `version`
+- Creates and pushes annotated Git tags (`vX.Y.Z`)
+- Supports full `skip-ci` detection
+
+**What it does NOT do:**
+- Does not deploy code
+- Does not run Terraform
+- Does not participate in pipelines
+
+**Execution model:**
+- Triggered by a **repo-level workflow** (typically on PR merge)
+- Runs independently of CI/CD pipelines
+- Governs repository version state only
+
+**Location:**
+```
+.github/actions/repository-auto-versioning/
 ```
 
-Notes:
-- Runs in the job's working directory. Set `defaults.run.working-directory` in your workflow or add `working-directory` on the step to target a module folder.
+---
 
-Docs:
-- For detailed behavior and examples, see [terraform setup README](.github/actions/terraform-setup/README.md)
+## Recommended Workflow Patterns
 
-### `.github/actions/print-run-context`
-Append a human‑readable summary (title, repo/run links, env, Terraform/Terratest metadata) to the job summary.
+### Infrastructure: Plan → Approve → Apply
 
-- Inputs: `title`, `environment`, `aws_account_id`, `aws_role_arn`, `working_directory`, `backend_config_file`, `var_file`, `plan_file`, `terraform_version`, `go_version`, `terratest_*`, `notes`
-- Example:
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@main
-  with:
-    title: Terraform Module Workflow Context
-    environment: sandbox
-    aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
-    working_directory: infra
-    plan_file: plan-sandbox.tfplan
-    terraform_version: 1.8.5
 ```
-Docs:
-- For detailed behavior and examples, see [print run context README](.github/actions/print-run-context/README.md)
-
-### `.github/actions/terraform-plan`
-Run terraform plan for a given environment and upload plan artifacts for cross-job reuse.
-
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-plan@main
-  with:
-    environment: sandbox
-```
-Note: Ensure Terraform is installed first (use `terraform-setup`).
-
-Docs:
-- For detailed behavior and examples, see [terraform plan README](.github/actions/terraform-plan/README.md)
-
-### `.github/actions/terraform-plan-destroy`
-Run terraform plan -destroy for a given environment and upload plan artifacts for cross-job reuse.
-
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-plan-destroy@main
-  with:
-    environment: sandbox
-```
-Note: Ensure Terraform is installed first (use `terraform-setup`).
-
-Docs:
-- For detailed behavior and examples, see [terraform plan destroy README](.github/actions/terraform-plan-destroy/README.md)
-
-### `.github/actions/terraform-apply`
-Apply the configuration for a given environment (file-driven backend + tfvars). Assumes `terraform-setup` has run.
-
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-apply@main
-  with:
-    environment: sandbox
-```
-Note: Ensure Terraform is installed first (use `terraform-setup`).
-
-Docs:
-- For detailed behavior and examples, see [terraform apply README](.github/actions/terraform-apply/README.md)
-
-### `.github/actions/terraform-destroy`
-Destroy the configuration for a given environment (file-driven backend + tfvars). Assumes `terraform-setup` has run.
-
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/terraform-destroy@main
-  with:
-    environment: sandbox
+print-run-context
+        ↓
+aws-auth-oidc
+        ↓
+terraform-setup
+        ↓
+terraform-plan
+        ↓
+(terraform-apply job with mandatory environment approval)
 ```
 
-Docs:
-- For detailed behavior and examples, see [terraform destroy README](.github/actions/terraform-destroy/README.md)
+---
 
-### `.github/actions/repository-auto-versioning`
-
-Automatically manages semantic versioning for repositories when a Pull Request is merged.
-This action:
-	•	Determines the next version based on PR labels / commit semantics
-	•	Updates the version file (e.g. VERSION)
-	•	Updates CHANGELOG.md
-	•	Creates and pushes an annotated Git tag (e.g. v1.4.0)
-	•	Optionally uploads execution logs as artifacts
-
-Designed to be reusable across Terraform modules, application repos, and infra repositories.
-
-```yaml
-- uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@main
-  with:
-    pr_number: ${{ github.event.pull_request.number }}
-    github_token: ${{ secrets.GITHUB_TOKEN }}
+### Infrastructure Destroy (Strict)
+```
+print-run-context
+        ↓
+aws-auth-oidc
+        ↓
+terraform-setup
+        ↓
+terraform-plan-destroy
+        ↓
+(terraform-apply-destroy job with mandatory approval)
 ```
 
-- Inputs
-	-	`pr_number` – Pull Request number used to determine version bump and changelog entries
-	-	`github_token` – GitHub token with permission to create commits and tags
+---
 
-- Outputs
-	-	`new_version` – The newly calculated semantic version (e.g. 1.3.2)
-	-	`tag` – The Git tag created (e.g. v1.3.2)
-	-	`release_type` – Version bump type (major | minor | patch)
+### Repository Versioning (Repo-Level Governance)
 
-- Notes
-	-	Should be executed only after PR merge
-	-	Requires contents: write permission
-	-	Assumes the repository follows semantic versioning
-	-	Works best when PRs are labeled (major, minor, patch) or follow conventional commits
+This workflow runs **outside of all CI/CD pipelines**.
 
-- Docs:
-  For detailed behavior and examples, see [terraform repository versioning README](.github/actions/repository-auto-versioning/README.md)
+Trigger:
+- Pull Request merged into default branch
 
-## Reusable Workflows
-
-### `.github/workflows/terraform-module.yml`
-Single reusable workflow for `plan`, `apply`, and `destroy` (via `action` input`). Uses `<env>-deploy` for approval gates and `<env>` for execution. Apply/Destroy are gated on all branches.
-
-- Inputs: `working_directory`, `environment`, `action` (plan|apply|destroy)
-- Behavior:
-  - plan: setup → plan (artifacts + summary)
-  - apply: setup → plan → approval in `<env>-deploy` → setup → apply
-  - destroy: setup → plan-destroy (artifacts + summary) → approval in `<env>-deploy` → setup → destroy
-- Example:
-```yaml
-jobs:
-  module:
-    uses: tool-ims/ims_tool-github-shared_actions/.github/workflows/terraform-module.yml@main
-    with:
-      working_directory: infra
-      environment: sandbox
-      action: apply
-    secrets: inherit
+Flow:
+```
+print-run-context
+        ↓
+skip-ci detection
+        ↓
+repository-auto-versioning
+        ↓
+annotated tag vX.Y.Z created
 ```
 
-## Requirements
+---
 
-- Org settings: allow reuse of workflows from private repositories (for cross‑repo reuse)
-- Repo vars: `AWS_ACCOUNT_ID` (or equivalent)
-- Environments:
-  - `<env>` (e.g. `sandbox`) — unprotected; holds env‑scoped vars/secrets; used by plan/apply/destroy
-  - `<env>-deploy` — protected; Required reviewers or Wait timer; used only for approval gates
-- IAM OIDC trust: allow `repo:<org>/<repo>:environment:<env>` in the role trust policy
+## Security Posture
 
-## Versioning
+### Authentication
+- Uses **OIDC** for AWS authentication
+- GitHub token scoped to repo where required
+- No long-lived secrets or access keys
+- IAM roles enforce least privilege
 
-Use `@v1` for stable major, or `@main` while iterating.
+### Approvals
+- Approvals required only for **state-changing operations**
+  - Terraform apply
+  - Terraform apply destroy
+  - Production deployments
+- Not required for:
+  - Plans
+  - Scans
+  - Version computation
+- GitHub Environments are the preferred approval mechanism
+
+### Blast Radius Control
+- Plan/apply separation prevents unintended changes
+- Destroy operations require explicit plans and approvals
+- Artifacts preserved for audit and rollback analysis
+
+---
+
+## How to Consume These Actions
+
+1. Reference the action using:
+   ```
+   uses: <org>/<repo>/.github/actions/<action-name>@v1
+   ```
+2. Start workflows with `print-run-context`
+3. Authenticate early using `aws-auth-oidc`
+4. Use `terraform-setup` once per job
+5. Always separate plan and apply into different jobs
+6. Protect apply jobs with environment approvals
+
+See the `examples/` directory for ready-to-use workflows.
+
+---
+
+## Versioning & Governance
+
+- All composite actions follow **semantic versioning**
+- Breaking changes increment major versions
+- Repository versioning is PR-driven and auditable
+
+---
+
+## Repository Structure
+
+```
+.github/actions/
+  print-run-context/
+  aws-auth-oidc/
+  terraform-setup/
+  terraform-plan/
+  terraform-plan-destroy/
+  terraform-apply/
+  terraform-apply-destroy/
+  repository-auto-versioning/
+
+README.md
+CHANGELOG.md
+version
+```
+
+---
+
+## Ownership
+
+Maintained by the **Platform / Terraform Tooling Team**.

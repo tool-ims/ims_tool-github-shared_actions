@@ -1,20 +1,31 @@
-name: Terraform Destroy
-description: Compute backend path from environment and run terraform destroy with env-scoped tfvars. Assumes AWS credentials configured by the caller.
+name: Terraform Apply (Destroy)
+description: >
+  Apply a previously generated Terraform destroy plan in a deterministic
+  and auditable manner. Assumes terraform init and authentication
+  have already been performed by the caller.
 author: Terraform Tooling Team
+
 inputs:
   working_directory:
-    description: Directory containing Terraform configuration.
-    required: false
-    default: "."
-  environment:
-    description: Environment name (sandbox/dev/prod) used to derive backend path
+    description: Directory containing Terraform configuration
     required: true
+    default: "."
+  plan_file:
+    description: Path to the Terraform destroy plan file (.tfplan)
+    required: true
+
 runs:
   using: composite
   steps:
-    - name: Terraform destroy
+    - name: Terraform apply with destroy-plan
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
-        ENV_NAME="${{ inputs.environment }}"
-        terraform destroy -input=false -auto-approve -var-file="env/${ENV_NAME}/${ENV_NAME}.tfvars"
+        set -euo pipefail
+        PLAN_FILE="${{ inputs.plan_file }}"
+        if [ ! -f "${PLAN_FILE}" ]; then
+          echo "ERROR: Terraform destroy plan file not found: ${PLAN_FILE}" >&2
+          exit 1
+        fi
+        echo "Applying Terraform destroy plan: ${PLAN_FILE}"
+        terraform apply -input=false -auto-approve "${PLAN_FILE}"

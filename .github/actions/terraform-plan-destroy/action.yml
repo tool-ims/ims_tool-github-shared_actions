@@ -1,14 +1,20 @@
 name: Terraform Plan (Destroy)
-description: Compute destroy plan for a given environment and upload artifacts. Assumes init was run by terraform-setup and AWS credentials configured by the caller.
+description: >
+  Run terraform plan -destroy with a caller-provided var-file, capture outputs,
+  publish summary, and upload destroy plan artifacts.
 author: Terraform Tooling Team
 inputs:
   working_directory:
-    description: Directory containing Terraform configuration.
-    required: false
+    description: Directory containing Terraform configuration
+    required: true
     default: "."
   environment:
-    description: Environment name (sandbox/dev/prod) used to derive var-file path
+    description: Environment name (dev, tst, ppe, prd)
     required: true
+  var_file:
+    description: Path to terraform tfvars file (relative to working_directory)
+    required: false
+    default: ""
 
 outputs:
   plan_status:
@@ -21,12 +27,11 @@ outputs:
     description: Path to the generated destroy plan file.
     value: ${{ steps.plan.outputs.plan_file }}
   plan_text_path:
-    description: Path to the rendered destroy plan text file.
+    description: Path to the rendered human-readable destroy plan file.
     value: ${{ steps.capture.outputs.plan_text_path }}
   plan_json_path:
-    description: Path to the rendered destroy plan JSON file.
+    description: Path to the rendered JSON destroy plan file.
     value: ${{ steps.capture.outputs.plan_json_path }}
-
 runs:
   using: composite
   steps:
@@ -35,30 +40,28 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
-        ENV_NAME="${{ inputs.environment }}"
-        PLAN_FILE="destroy-plan-${ENV_NAME}.tfplan"
         set +e
-        terraform plan -destroy -input=false -no-color -detailed-exitcode -out="$PLAN_FILE" -var-file="env/${ENV_NAME}/${ENV_NAME}.tfvars"
+        ENV_NAME="${{ inputs.environment }}"
+        VAR_FILE="${{ inputs.var_file }}"
+        PLAN_FILE="destroy-plan-${ENV_NAME}.tfplan"
+        terraform plan -destroy -input=false -no-color -detailed-exitcode -out=${PLAN_FILE} ${VAR_FILE:+-var-file=${VAR_FILE}}
         ec=$?
-        if [ $ec -eq 0 ] || [ $ec -eq 2 ]; then
-          status=$([ $ec -eq 2 ] && echo changes || echo no_changes)
-          echo "plan_status=$status" >> "$GITHUB_OUTPUT"
-          echo "plan_exit_code=$ec" >> "$GITHUB_OUTPUT"
-          echo "plan_file=$(pwd)/$PLAN_FILE" >> "$GITHUB_OUTPUT"
+        if [ "$ec" -eq 0 ] || [ "$ec" -eq 2 ]; then
+          status=$([ "$ec" -eq 2 ] && echo changes || echo no_changes)
+          echo "plan_status=${status}" >> "$GITHUB_OUTPUT"
+          echo "plan_exit_code=${ec}" >> "$GITHUB_OUTPUT"
+          echo "plan_file=$(pwd)/${PLAN_FILE}" >> "$GITHUB_OUTPUT"
           exit 0
-        else
-          exit $ec
         fi
-
-    - name: Capture plan outputs
+        exit "$ec"
+    - name: Capture destroy plan outputs
       id: capture
       if: ${{ success() }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
         set -euo pipefail
-        ENV_NAME="${{ inputs.environment }}"
-        PLAN_FILE="destroy-plan-${ENV_NAME}.tfplan"
+        PLAN_FILE="destroy-plan-${{ inputs.environment }}.tfplan"
         terraform show -no-color "$PLAN_FILE" > destroy-plan.txt
         terraform show -json "$PLAN_FILE" > destroy-plan.json
         echo "plan_text_path=$(pwd)/destroy-plan.txt" >> "$GITHUB_OUTPUT"
@@ -86,7 +89,7 @@ runs:
       if: ${{ steps.plan.outputs.plan_file != '' }}
       uses: actions/upload-artifact@v4
       with:
-        name: tfdestroy-plan
+        name: destroy-plan-${{ inputs.environment }}-${{ github.run_id }}
         path: |
           ${{ steps.plan.outputs.plan_file }}
           ${{ steps.capture.outputs.plan_text_path }}

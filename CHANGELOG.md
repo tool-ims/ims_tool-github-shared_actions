@@ -1,3 +1,9 @@
+## v1.0.2
+
+- PR_NUMBER=11
+- added new action and updated existing composite action
+- added new action and updated existing composite action
+
 ## v1.0.1
 
 - PR_NUMBER=10

@@ -14,6 +14,11 @@ jobs:
     if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          #token: ${{ steps.app-token.outputs.token }}
       # Generate GitHub App Token (PRIMARY AUTH)
       - name: Generate GitHub App token
         id: app-token
@@ -21,11 +26,6 @@ jobs:
         with:
           app_id: ${{ secrets.GH_APP_ID }}
           private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-      - name: Checkout (full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
       # Initial Summary
       - name: Initial run summary
         id: initial_summary

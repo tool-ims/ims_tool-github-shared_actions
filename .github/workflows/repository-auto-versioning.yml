@@ -17,7 +17,7 @@ jobs:
       # Generate GitHub App Token (PRIMARY AUTH)
       - name: Generate GitHub App token
         id: app-token
-        uses: tibdex/github-app-token@v2
+        uses: ./.github/actions/github-app-token
         with:
           app_id: ${{ secrets.GH_APP_ID }}
           private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}

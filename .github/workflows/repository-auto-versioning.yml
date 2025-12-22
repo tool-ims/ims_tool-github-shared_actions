@@ -32,23 +32,6 @@ jobs:
         uses: ./github/actions/print-run-context
         with:
           title: "repository-auto-versioning — Initial Context"      
-      - name: Initial run summary
-        id: initial_summary
-        shell: bash
-        run: |
-          {
-            echo "## repository-auto-versioning — Initial Context"
-            echo "- Repository: ${{ github.repository }}"
-            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} (#${{ github.run_number }})"
-            echo "- Trigger: ${{ github.event_name }}"
-            echo "- Actor: ${{ github.actor }}"
-            echo "- PR: #${{ github.event.pull_request.number }} (${{
-              github.event.pull_request.head.ref
-            }} → ${{
-              github.event.pull_request.base.ref
-            }})"
-            echo "- Next step: skip-ci detection"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       # Full "Skip CI" detection (title/body/commits)
       - name: Full Skip CI Check (title, body, commits)

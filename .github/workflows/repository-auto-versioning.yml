@@ -29,6 +29,11 @@ jobs:
       # Initial Summary
       - name: Initial run summary
         id: initial_summary
+        uses: ./github/actions/print-run-context
+        with:
+          title: "repository-auto-versioning — Initial Context"      
+      - name: Initial run summary
+        id: initial_summary
         shell: bash
         run: |
           {

@@ -7,12 +7,12 @@ author: Terraform Tooling Team
 inputs:
   working_directory:
     description: Directory containing Terraform configuration
-    required: false
+    required: true
     default: "."
 
   backend_config_file:
     description: Optional backend config file to pass to terraform init
-    required: false
+    required: true
     default: ""
 
 runs:

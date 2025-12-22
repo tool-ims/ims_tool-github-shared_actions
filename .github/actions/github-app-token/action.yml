@@ -1,0 +1,29 @@
+name: GitHub App Token (Internal)
+description: Generate a GitHub App installation token using App ID and private key
+author: tool-ims platform team
+
+inputs:
+  app_id:
+    description: GitHub App ID
+    required: true
+  private_key:
+    description: GitHub App private key (PEM)
+    required: true
+
+outputs:
+  token:
+    description: GitHub App installation access token
+    value: ${{ steps.generate.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Generate installation token
+      id: generate
+      shell: bash
+      run: |
+        "${{ github.action_path }}/scripts/generate-token.sh"
+      env:
+        APP_ID: ${{ inputs.app_id }}
+        PRIVATE_KEY: ${{ inputs.private_key }}
+        GITHUB_API_URL: ${{ github.api_url }}

@@ -16,5 +16,6 @@ jobs:
     with:
       pr_number: ${{ github.event.pull_request.number }}
       # GitHub App credentials (inputs, not secrets in reusable workflow)
+    secrets:
       github_app_id: ${{ secrets.GH_APP_ID }}
       github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}

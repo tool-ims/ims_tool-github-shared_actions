@@ -48,7 +48,7 @@ runs:
         latest_tag=""
         if git describe --tags --abbrev=0 >/dev/null 2>&1; then
           latest_tag=$(git describe --tags --abbrev=0)
-          current="${latest_tag#v}"
+          current="$(echo "${latest_tag#v}" | cut -d- -f1)"
         elif [ -f version ]; then
           current=$(cat version | tr -d '\r\n')
         else

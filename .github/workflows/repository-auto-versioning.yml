@@ -29,7 +29,7 @@ jobs:
       # Initial Summary
       - name: Initial run summary
         id: initial_summary
-        uses: ./github/actions/print-run-context
+        uses: ./.github/actions/print-run-context
         with:
           title: "repository-auto-versioning — Initial Context"      
 

@@ -5,8 +5,8 @@ on:
     types: [closed]
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: write          # required to create tags / update files
+  pull-requests: read      # required to read PR metadata
 
 jobs:
   tag-and-version:
@@ -14,33 +14,34 @@ jobs:
     if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     steps:
+      # Generate GitHub App Token (PRIMARY AUTH)
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Initial Summary (ALWAYS RUNS)
+          token: ${{ steps.app-token.outputs.token }}
+      # Initial Summary
       - name: Initial run summary
         id: initial_summary
         shell: bash
         run: |
-          REPO="${{ github.repository }}"
-          SERVER_URL="${{ github.server_url }}"
-          RUN_ID="${{ github.run_id }}"
-          RUN_NUMBER="${{ github.run_number }}"
-          EVENT_NAME="${{ github.event_name }}"
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          ACTOR="${{ github.actor }}"
-          HEAD_REF="${{ github.head_ref || '' }}"
-          BASE_REF="${{ github.base_ref || '' }}"
           {
             echo "## repository-auto-versioning — Initial Context"
-            echo "- Repository: ${REPO}"
-            echo "- Run: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID} (#${RUN_NUMBER})"
-            echo "- Trigger: ${EVENT_NAME}"
-            echo "- Actor: ${ACTOR}"
-            if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
-              echo "- PR: #${PR_NUMBER} (${HEAD_REF} → ${BASE_REF})"
-            fi
+            echo "- Repository: ${{ github.repository }}"
+            echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} (#${{ github.run_number }})"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Actor: ${{ github.actor }}"
+            echo "- PR: #${{ github.event.pull_request.number }} (${{
+              github.event.pull_request.head.ref
+            }} → ${{
+              github.event.pull_request.base.ref
+            }})"
             echo "- Next step: skip-ci detection"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -49,12 +50,10 @@ jobs:
         id: check_skip
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
-          OWNER_REPO="${{ github.repository }}"
-          echo "Checking PR #${PR_NUMBER} for skip markers (title / body / commits)..."
+          echo "Checking PR #${{ github.event.pull_request.number }} for skip markers (title / body / commits)..."
 
           contains_skip() {
             # Accept common variants: [skip ci], skip-ci, skip_ci, skip ci (case-insensitive)
@@ -62,8 +61,8 @@ jobs:
           }
 
           # default outputs so step always has outputs
-          echo "skip=false" >> $GITHUB_OUTPUT
-          echo "skip_where=none" >> $GITHUB_OUTPUT
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "skip_where=none" >> "$GITHUB_OUTPUT"
           # Check PR title & body
           if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
             PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
@@ -88,8 +87,10 @@ jobs:
 
           # Check each commit message in the PR using GitHub API
           echo "Fetching commits for PR via GitHub API..."
-          commits_json=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/commits" || true)
+          commits_json=$(curl -s \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits" || true)
 
           # If API returned JSON array, inspect commit messages; otherwise warn and skip commit-level checks.
           first_char="$(printf '%s' "$commits_json" | head -c 1 || echo '')"
@@ -97,8 +98,8 @@ jobs:
             printf '%s' "$commits_json" | jq -r '.[].commit.message' | while IFS= read -r msg; do
               if contains_skip "$msg"; then
                 echo "Found skip marker in PR commit message"
-                echo "skip=true" >> $GITHUB_OUTPUT
-                echo "skip_where=commit" >> $GITHUB_OUTPUT
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "skip_where=commit" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             done
@@ -119,56 +120,15 @@ jobs:
             echo "- Composite action was not executed."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Configure Git for private modules
-      - name: Configure Git for private modules
-        if: ${{ steps.check_skip.outputs.skip == 'false' }}
-        id: private_auth
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          private_status="missing"
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            # replace github.com with x-access-token URL so subsequent 'git' fetches can access private repos
-            git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-            private_status="configured"
-          fi
-          echo "private_git_auth=${private_status}" >> $GITHUB_OUTPUT
-
-      # Private auth summaries (success / failure)
-      - name: Private auth success summary
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
-        shell: bash
-        run: |
-          AUTH="${{ steps.private_auth.outputs.private_git_auth || 'unknown' }}"
-          {
-            echo "## repository-auto-versioning — Private Git config"
-            echo "- Private module auth: ${AUTH}"
-            echo "- Private auth step: succeeded"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Private auth failure summary
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome != 'success' }}
-        shell: bash
-        run: |
-          AUTH="${{ steps.private_auth.outputs.private_git_auth || 'missing' }}"
-          {
-            echo "## repository-auto-versioning — Private Git config"
-            echo "- Private module auth: ${AUTH}"
-            echo "- Private auth step: FAILED"
-            echo "- Note: Without configured private git auth, composite action may fail to fetch private modules or action code from other org repos."
-            echo "- Tip: ensure the `GITHUB_TOKEN` or a PAT secret is available and the workflow has permission to use it."
-          } >> "$GITHUB_STEP_SUMMARY"
-      # 5) Pre-call composite summary
+      # Pre-call Composite Summary
       - name: Pre-call summary for composite action repository-auto-version
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
+        if: ${{ steps.check_skip.outputs.skip == 'false' }}
         shell: bash
         run: |
           {
             echo "## repository-auto-versioning — Composite Start"
             echo "- Action: ./.github/actions/repository-auto-versioning"
             echo "- PR: #${{ github.event.pull_request.number }}"
-            # try get current version from repo file if exists
             if [ -f version ]; then
               echo "- Current version (repo file): $(cat version | tr -d '\r\n')"
             else
@@ -176,43 +136,36 @@ jobs:
             fi
             echo "- Next: running composite action to compute new version"
           } >> "$GITHUB_STEP_SUMMARY"
-      # Run composite repository-auto-versioning if NOT skipped and private_auth succeeded
+      # Run composite repository-auto-versioning (GitHub App token)
       - name: Run repository-auto-versioning
-        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.private_auth.outcome == 'success' }}
+        if: ${{ steps.check_skip.outputs.skip == 'false' }}
         id: tagger
-        uses:  ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
+        uses: ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
         # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
         with:
           pr_number: ${{ github.event.pull_request.number }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
 
-      # Repo-level result summary (on success of tagger)
+      # Repo-level Result Summary (SUCCESS)
       - name: Repo-level result summary (on success)
         if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome == 'success' }}
         shell: bash
         run: |
-          TAG="${{ steps.tagger.outputs.new_version || '' }}"
-          UPDATE_TYPE="${{ steps.tagger.outputs.update_type || 'unknown' }}"
           {
             echo "## repository-auto-versioning — Result"
             echo "- Status: SUCCESS"
-            if [ -n "${TAG}" ]; then
-              echo "- Created tag: ${TAG}"
-              echo "- Update type: ${UPDATE_TYPE}"
-            else
-              echo "- No tag created (unexpected). Check composite action logs."
-            fi
+            echo "- Created tag: ${{ steps.tagger.outputs.new_version || 'n/a' }}"
+            echo "- Update type: ${{ steps.tagger.outputs.update_type || 'unknown' }}"
             echo "- Composite action appended detailed summary."
-            echo "- Tip: enable upload_logs: 'true' to capture /tmp/ci_versioning.log as an artifact for debugging."
           } >> "$GITHUB_STEP_SUMMARY"
-      # Repo-level result summary (on failure of tagger)
+      # Repo-level Result Summary (FAILURE)
       - name: Repo-level result summary (on failure)
         if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome != 'success' }}
         shell: bash
         run: |
           {
             echo "## repository-auto-versioning — Result"
-            echo "- Status: FAILED"
-            echo "- The repository-auto-versioning composite action failed. See the composite step logs for details."
-            echo "- Consider re-running with 'upload_logs: true' to capture debug artifact (/tmp/ci_versioning.log)."
+            echo "- Status:${{ steps.tagger.outcome }}"
+            echo "- The repository-auto-versioning composite action failed."
+            echo "- Check composite action logs for details."
           } >> "$GITHUB_STEP_SUMMARY"

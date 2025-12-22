@@ -8,9 +8,9 @@ on:
         required: true
         type: number
     secrets:
-      GH_APP_ID:
+      github_app_id:
         required: true
-      GH_APP_PRIVATE_KEY:
+      github_app_private_key:
         required: true
 
 permissions:
@@ -54,8 +54,8 @@ jobs:
         id: app-token
         uses: ./.github/actions/github-app-token
         with:
-          app_id: ${{ secrets.GH_APP_ID }}
-          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          app_id: ${{ secrets.github_app_id }}
+          private_key: ${{ secrets.github_app_private_key }}
       # Initial Summary
       - name: Initial run summary
         id: initial_summary

@@ -7,14 +7,11 @@ on:
         description: Pull Request number
         required: true
         type: number
-      github_app_id:
-        description: GitHub App ID
+    secrets:
+      GH_APP_ID:
         required: true
-        type: string
-      github_app_private_key:
-        description: GitHub App private key (PEM)
+      GH_APP_PRIVATE_KEY:
         required: true
-        type: string
 
 permissions:
   contents: write          # required to create tags / update files
@@ -57,8 +54,8 @@ jobs:
         id: app-token
         uses: ./.github/actions/github-app-token
         with:
-          app_id: ${{ inputs.github_app_id }}
-          private_key: ${{ inputs.github_app_private_key }}
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
       # Initial Summary
       - name: Initial run summary
         id: initial_summary

@@ -1,8 +1,20 @@
-name: Repository_versioning
+name: Repository Versioning (Reusable)
 
 on:
-  pull_request:
-    types: [closed]
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull Request number
+        required: true
+        type: number
+      github_app_id:
+        description: GitHub App ID
+        required: true
+        type: string
+      github_app_private_key:
+        description: GitHub App private key (PEM)
+        required: true
+        type: string
 
 permissions:
   contents: write          # required to create tags / update files
@@ -10,22 +22,43 @@ permissions:
 
 jobs:
   tag-and-version:
-    # Only run when the PR was merged
-    if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (full)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          #token: ${{ steps.app-token.outputs.token }}
-      # Generate GitHub App Token (PRIMARY AUTH)
+      - name: Ensure jq is installed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if command -v jq >/dev/null 2>&1; then
+            echo "jq already installed: $(jq --version)"
+            exit 0
+          fi
+
+          echo "jq not found. Installing..."
+
+          if [ -f /etc/redhat-release ]; then
+            sudo yum install -y jq || sudo dnf install -y jq
+          elif [ -f /etc/debian_version ]; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          else
+            echo "Unsupported OS. Installing static jq binary..."
+            curl -L -o jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            chmod +x jq
+            sudo mv jq /usr/local/bin/jq
+          fi
+
+          echo "jq installed: $(jq --version)"
       - name: Generate GitHub App token
         id: app-token
         uses: ./.github/actions/github-app-token
         with:
-          app_id: ${{ secrets.GH_APP_ID }}
-          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          app_id: ${{ inputs.github_app_id }}
+          private_key: ${{ inputs.github_app_private_key }}
       # Initial Summary
       - name: Initial run summary
         id: initial_summary
@@ -39,9 +72,10 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
         run: |
           set -euo pipefail
-          echo "Checking PR #${{ github.event.pull_request.number }} for skip markers (title / body / commits)..."
+          echo "Checking PR #${{ inputs.pr_number }} for skip markers (title / body / commits)..."
 
           contains_skip() {
             # Accept common variants: [skip ci], skip-ci, skip_ci, skip ci (case-insensitive)
@@ -78,7 +112,7 @@ jobs:
           commits_json=$(curl -s \
             -H "Authorization: token ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits" || true)
+            ${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/commits || true)
 
           # If API returned JSON array, inspect commit messages; otherwise warn and skip commit-level checks.
           first_char="$(printf '%s' "$commits_json" | head -c 1 || echo '')"
@@ -115,8 +149,7 @@ jobs:
         run: |
           {
             echo "## repository-auto-versioning — Composite Start"
-            echo "- Action: ./.github/actions/repository-auto-versioning"
-            echo "- PR: #${{ github.event.pull_request.number }}"
+            echo "- PR: #${{ inputs.pr_number }}"
             if [ -f version ]; then
               echo "- Current version (repo file): $(cat version | tr -d '\r\n')"
             else
@@ -131,8 +164,8 @@ jobs:
         uses: ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
         # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
         with:
-          pr_number: ${{ github.event.pull_request.number }}
-          github_token: ${{ steps.app-token.outputs.token }}
+          pr_number: ${{ inputs.pr_number }}
+          github_app_token: ${{ steps.app-token.outputs.token }}
 
       # Repo-level Result Summary (SUCCESS)
       - name: Repo-level result summary (on success)
@@ -154,6 +187,6 @@ jobs:
           {
             echo "## repository-auto-versioning — Result"
             echo "- Status:${{ steps.tagger.outcome }}"
-            echo "- The repository-auto-versioning composite action failed."
+            echo "- The repository-auto-versioning action failed."
             echo "- Check composite action logs for details."
           } >> "$GITHUB_STEP_SUMMARY"

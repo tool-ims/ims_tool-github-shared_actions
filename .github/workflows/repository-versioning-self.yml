@@ -1,0 +1,20 @@
+name: Repository Versioning
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write          # required for tags / commits
+  pull-requests: read      # required for PR metadata
+
+jobs:
+  versioning:
+    # Run only when PR is merged
+    if: ${{ github.event.pull_request.merged == true }}
+    uses: ./.github/workflows/repository-versioning-reusable.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      # GitHub App credentials (inputs, not secrets in reusable workflow)
+      github_app_id: ${{ secrets.GH_APP_ID }}
+      github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}

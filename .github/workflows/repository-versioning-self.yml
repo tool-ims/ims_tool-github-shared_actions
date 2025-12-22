@@ -1,21 +1,181 @@
-name: Repository Versioning
+name: Repository Versioning Self
 
 on:
   pull_request:
     types: [closed]
-
 permissions:
-  contents: write          # required for tags / commits
-  pull-requests: read      # required for PR metadata
+  contents: write          # required to create tags / update files
+  pull-requests: read      # required to read PR metadata
 
 jobs:
-  versioning:
-    # Run only when PR is merged
+  tag-and-version:
+    # Only run when the PR was merged
     if: ${{ github.event.pull_request.merged == true }}
-    uses: ./.github/workflows/repository-versioning-reusable.yml
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      # GitHub App credentials (inputs, not secrets in reusable workflow)
-    secrets:
-      github_app_id: ${{ secrets.GH_APP_ID }}
-      github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure jq is installed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if command -v jq >/dev/null 2>&1; then
+            echo "jq already installed: $(jq --version)"
+            exit 0
+          fi
+
+          echo "jq not found. Installing..."
+
+          if [ -f /etc/redhat-release ]; then
+            sudo yum install -y jq || sudo dnf install -y jq
+          elif [ -f /etc/debian_version ]; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          else
+            echo "Unsupported OS. Installing static jq binary..."
+            curl -L -o jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            chmod +x jq
+            sudo mv jq /usr/local/bin/jq
+          fi
+
+          echo "jq installed: $(jq --version)"
+      - name: Generate GitHub App token
+        id: app-token
+        uses: ./.github/actions/github-app-token
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      # Initial Summary
+      - name: Initial run summary
+        id: initial_summary
+        uses: ./.github/actions/print-run-context
+        with:
+          title: "repository-auto-versioning — Initial Context"      
+
+      # Full "Skip CI" detection (title/body/commits)
+      - name: Full Skip CI Check (title, body, commits)
+        id: check_skip
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          echo "Checking PR #${{ github.event.pull_request.number }} for skip markers (title / body / commits)..."
+
+          contains_skip() {
+            # Accept common variants: [skip ci], skip-ci, skip_ci, skip ci (case-insensitive)
+            echo "$1" | grep -qiE '\[?skip[ _-]?ci\]?'
+          }
+
+          # default outputs so step always has outputs
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "skip_where=none" >> "$GITHUB_OUTPUT"
+          # Check PR title & body
+          if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+            PR_TITLE=$(jq -r '.pull_request.title // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+            PR_BODY=$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+            echo "PR title: ${PR_TITLE}"
+            echo "PR body: (length) $(printf "%s" "$PR_BODY" | wc -c) chars"
+
+            if contains_skip "$PR_TITLE"; then
+              echo "Found skip marker in PR title."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              echo "skip_where=title" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if contains_skip "$PR_BODY"; then
+              echo "Found skip marker in PR body."
+              echo "skip=true" >> $GITHUB_OUTPUT
+              echo "skip_where=body" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          # Check each commit message in the PR using GitHub API
+          echo "Fetching commits for PR via GitHub API..."
+          commits_json=$(curl -s \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            ${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits || true)
+
+          # If API returned JSON array, inspect commit messages; otherwise warn and skip commit-level checks.
+          first_char="$(printf '%s' "$commits_json" | head -c 1 || echo '')"
+          if [ "$first_char" = "[" ]; then
+            printf '%s' "$commits_json" | jq -r '.[].commit.message' | while IFS= read -r msg; do
+              if contains_skip "$msg"; then
+                echo "Found skip marker in PR commit message"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "skip_where=commit" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+          else
+            echo "Warning: commits API returned non-array (or error). Skipping commit-level skip-ci detection."
+            echo "commits_api_head: ${commits_json:0:200}"
+          fi
+
+      # Skip Notice (if skip ci=true)
+      - name: Skip notice (when skip ci=true)
+        if: ${{ steps.check_skip.outputs.skip == 'true' }}
+        shell: bash
+        run: |
+          {
+            echo "## repository-auto-versioning — Skipped"
+            echo "- Reason: skip-ci marker detected"
+            echo "- Location: ${{ steps.check_skip.outputs.skip_where }}"
+            echo "- Composite action was not executed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Pre-call Composite Summary
+      - name: Pre-call summary for composite action repository-auto-version
+        if: ${{ steps.check_skip.outputs.skip == 'false' }}
+        shell: bash
+        run: |
+          {
+            echo "## repository-auto-versioning — Composite Start"
+            echo "- PR: #${{ github.event.pull_request.number }}"
+            if [ -f version ]; then
+              echo "- Current version (repo file): $(cat version | tr -d '\r\n')"
+            else
+              echo "- Current version: unknown (no version file)"
+            fi
+            echo "- Next: running composite action to compute new version"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Run composite repository-auto-versioning (GitHub App token)
+      - name: Run repository-auto-versioning
+        if: ${{ steps.check_skip.outputs.skip == 'false' }}
+        id: tagger
+        uses: ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
+        # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
+          github_app_token: ${{ steps.app-token.outputs.token }}
+
+      # Repo-level Result Summary (SUCCESS)
+      - name: Repo-level result summary (on success)
+        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome == 'success' }}
+        shell: bash
+        run: |
+          {
+            echo "## repository-auto-versioning — Result"
+            echo "- Status: SUCCESS"
+            echo "- Created tag: ${{ steps.tagger.outputs.new_version || 'n/a' }}"
+            echo "- Update type: ${{ steps.tagger.outputs.update_type || 'unknown' }}"
+            echo "- Composite action appended detailed summary."
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Repo-level Result Summary (FAILURE)
+      - name: Repo-level result summary (on failure)
+        if: ${{ steps.check_skip.outputs.skip == 'false' && steps.tagger.outcome != 'success' }}
+        shell: bash
+        run: |
+          {
+            echo "## repository-auto-versioning — Result"
+            echo "- Status:${{ steps.tagger.outcome }}"
+            echo "- The repository-auto-versioning action failed."
+            echo "- Check composite action logs for details."
+          } >> "$GITHUB_STEP_SUMMARY"

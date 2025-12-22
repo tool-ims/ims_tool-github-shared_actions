@@ -52,14 +52,14 @@ jobs:
           echo "jq installed: $(jq --version)"
       - name: Generate GitHub App token
         id: app-token
-        uses: ./.github/actions/github-app-token
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/github-app-token@v1
         with:
           app_id: ${{ secrets.github_app_id }}
           private_key: ${{ secrets.github_app_private_key }}
       # Initial Summary
       - name: Initial run summary
         id: initial_summary
-        uses: ./.github/actions/print-run-context
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/print-run-context@v1
         with:
           title: "repository-auto-versioning — Initial Context"      
 
@@ -158,8 +158,7 @@ jobs:
       - name: Run repository-auto-versioning
         if: ${{ steps.check_skip.outputs.skip == 'false' }}
         id: tagger
-        uses: ./.github/actions/repository-auto-versioning   # <- replace with your published composite action@tag
-        # format: uses: <owner>/<repo>[/<path-to-action>]@<ref> Ex: uses: my-org/shared-repo/.github/actions/git-auto-version@v1.0.0
+        uses: tool-ims/ims_tool-github-shared_actions/.github/actions/repository-auto-versioning@v1
         with:
           pr_number: ${{ inputs.pr_number }}
           github_app_token: ${{ steps.app-token.outputs.token }}

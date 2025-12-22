@@ -1,3 +1,9 @@
+## v1.0.7
+
+- PR_NUMBER=27
+- updated
+- updated
+
 ## v1.0.6
 
 - PR_NUMBER=26

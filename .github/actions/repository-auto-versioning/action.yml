@@ -1,10 +1,10 @@
 name: "repository-auto-versioning"
-description: "Compute semver from PR commits, update CHANGELOG/version, create annotated tag vX.Y.Z and push."
+description: "Compute semver from PR commits, update CHANGELOG/version, create annotated tag vX.Y.Z and promote v1."
 author: "Tooling Team"
 
 inputs:
-  github_token:
-    description: "GitHub token (required). Pass secrets.GITHUB_TOKEN from caller workflow."
+  github_app_token:
+    description: "GitHub App installation token"
     required: true
   pr_number:
     description: "Pull Request number (required)."
@@ -17,6 +17,9 @@ outputs:
   update_type:
     description: "Type of version bump (major/minor/patch)"
     value: ${{ steps.run_update.outputs.computed_update_type }}
+  latest_tag:
+    description: "Previous latest tag"
+    value: ${{ steps.latest.outputs.latest_tag }}
 
 runs:
   using: composite
@@ -58,7 +61,8 @@ runs:
       id: gather
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_TOKEN: ${{ inputs.github_app_token }}
+        GITHUB_API_URL: ${{ github.api_url }}
       run: |
         set -euo pipefail
         PR="${{ inputs.pr_number }}"
@@ -80,15 +84,14 @@ runs:
           fi
         fi
 
-        OWNER_REPO="${GITHUB_REPOSITORY}"
         TMP_RESP="$(mktemp)"
         HTTP_STATUS=0
 
         if [ -n "${GITHUB_TOKEN:-}" ]; then
           HTTP_STATUS=$(curl -sS -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -w "%{http_code}" \
-            "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true)
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits" -o "${TMP_RESP}" || true)
         else
-          curl -sS -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${OWNER_REPO}/pulls/${PR}/commits" -o "${TMP_RESP}" || true
+          curl -sS -H "Accept: application/vnd.github+json" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits" -o "${TMP_RESP}" || true
           HTTP_STATUS=0
         fi
 
@@ -100,19 +103,6 @@ runs:
             echo "$msg" >> "${OUT}"
             echo "###COMMIT###" >> "${OUT}"
           done
-        else
-          # fallback: log response for debugging; try best-effort extraction if valid JSON
-          echo "WARNING: commits API unexpected (HTTP=${HTTP_STATUS})" > /tmp/ci_versioning_gather.log
-          head -c 2048 "${TMP_RESP}" >> /tmp/ci_versioning_gather.log 2>/dev/null || true
-          if jq -e '.[0].commit.message' "${TMP_RESP}" >/dev/null 2>&1; then
-            jq -r '.[].commit.message' "${TMP_RESP}" | while IFS= read -r msg; do
-              [ -z "$msg" ] && continue
-              echo "$msg" >> "${OUT}"
-              echo "###COMMIT###" >> "${OUT}"
-            done
-          else
-            echo "No commits parsed from API; proceeding with PR title/body only (see /tmp/ci_versioning_gather.log)" >> /tmp/ci_versioning_gather.log
-          fi
         fi
 
         rm -f "${TMP_RESP}" || true
@@ -132,11 +122,11 @@ runs:
         echo "gather_log=${{ steps.gather.outputs.gather_log }}" >> "${LOG}"
         echo "log_file=${LOG}" >> $GITHUB_OUTPUT
 
-    - name: Run updateVersion script (bundled) with logging
+    - name: Run updateVersion script
       id: run_update
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_TOKEN: ${{ inputs.github_app_token }}
       run: |
         set -euo pipefail
         LOG="${{ steps.init_log.outputs.log_file }}"
@@ -149,9 +139,7 @@ runs:
           exit 1
         fi
         chmod +x "$SCRIPT" || true
-
         echo "Running script: $SCRIPT $CURRENT $COMMITS_FILE" | tee -a "${LOG}"
-
         # Capture stdout of script separately and send stderr to log; diagnostics go to stderr in script,
         # final semver is printed to stdout by the script (guaranteed).
         STDOUT="$("$SCRIPT" "$CURRENT" "$COMMITS_FILE" 2>>"${LOG}")" || ( echo "updateVersion.sh failed; check ${LOG}" | tee -a "${LOG}" >&2; exit 1 )
@@ -160,7 +148,6 @@ runs:
         printf '%s\n' "${STDOUT}" >> "${LOG}"
         # Remove empty lines
         CLEAN="$(printf '%s\n' "${STDOUT}" | sed '/^[[:space:]]*$/d')"
-
         # Last line = version
         NEW_VERSION="$(printf '%s\n' "${CLEAN}" | tail -n1 | tr -d '\r')"
         # Second last line = update type (UPDATE_TYPE=xxx)
@@ -177,11 +164,12 @@ runs:
         echo "computed_new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
         echo "computed_update_type=${UPDATE_TYPE:-unknown}" >> $GITHUB_OUTPUT
 
-    - name: Commit CHANGELOG and version, create annotated tag
+    - name: Commit CHANGELOG and version, create tag
       id: release
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_TOKEN: ${{ inputs.github_app_token }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
       run: |
         set -euo pipefail
         LOG="${{ steps.init_log.outputs.log_file }}"
@@ -199,8 +187,7 @@ runs:
         fi
 
         # ensure push uses provided token
-        GIT_AUTH_TOKEN="${{ inputs.github_token }}"
-        REPO_URL="https://x-access-token:${GIT_AUTH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        REPO_URL="https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
         git tag -a "${TAG}" -m "Version ${NEW}"
         if git push "${REPO_URL}" "${TAG}"; then
           echo "Pushed ${TAG}" | tee -a "${LOG}"
@@ -220,3 +207,14 @@ runs:
         git push "${REPO_URL}" "HEAD:main" || echo "Push of commit failed (permissions or branch protection)" | tee -a "${LOG}"
 
         echo "new_version=${TAG}" >> $GITHUB_OUTPUT
+    - name: Promote major tag v1
+      if: ${{ steps.run_update.outputs.computed_update_type != 'major' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_app_token }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
+      run: |
+        set -euo pipefail
+        REPO_URL="https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
+        git tag -f v1 "${{ steps.release.outputs.new_version }}"
+        git push "${REPO_URL}" v1 --force

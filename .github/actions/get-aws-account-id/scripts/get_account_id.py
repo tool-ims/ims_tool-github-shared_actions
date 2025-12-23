@@ -29,8 +29,8 @@ def main() -> None:
     environment = sys.argv[2]
 
     # Resolve repo root (action/scripts/ -> repo root)
-    base_dir = Path(__file__).resolve().parent.parent
-    mapping_file = base_dir / "mappings" / "aws-accounts-mapping.json"
+    action_dir = Path(__file__).resolve().parents[1]
+    mapping_file = action_dir / "mappings" / "aws-accounts-mapping.json"
 
     if not mapping_file.exists():
         fail(f"Mapping file not found: {mapping_file}")

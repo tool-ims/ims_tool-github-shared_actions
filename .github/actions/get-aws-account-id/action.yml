@@ -22,13 +22,19 @@ runs:
       id: resolve
       shell: bash
       run: |
+        set -euo pipefail
         PYTHON_BIN=$(command -v python3 || command -v python)
-
         if [ -z "$PYTHON_BIN" ]; then
           echo "ERROR: Python is required but not found on runner"
           exit 1
         fi
+        echo "[get-aws-account-id] Running resolver..."
         ACCOUNT_ID=$("$PYTHON_BIN" "${{ github.action_path }}/scripts/get_account_id.py" \
           "${{ inputs.tower }}" \
           "${{ inputs.environment }}")
+        echo "[get-aws-account-id] Output captured successfully"
+        if [ -z "$ACCOUNT_ID" ]; then
+          echo "ERROR: account_id resolved as empty" >&2
+          exit 1
+        fi
         echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"

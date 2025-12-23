@@ -1,3 +1,9 @@
+## v1.0.8
+
+- PR_NUMBER=28
+- updated org account id
+- updated org account id
+
 ## v1.0.7
 
 - PR_NUMBER=27

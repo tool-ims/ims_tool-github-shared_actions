@@ -2,7 +2,7 @@ name: AWS OIDC Two-Hop Authentication
 description: >
   Performs secure two-hop AWS authentication using GitHub Actions OIDC.
   GitHub Actions first assumes an IAM role in the Organization (management)
-  account, then assumes the same role name in the target AWS account.
+  account using OIDC, then assumes the same role name in the target AWS account using STS role chaining.
 
 inputs:
   target_account_id:
@@ -33,11 +33,15 @@ runs:
         role-to-assume: arn:aws:iam::302263080338:role/iamr-${{ inputs.tower }}-${{ inputs.environment }}-deploy
         aws-region: ${{ inputs.region }}
         role-session-name: org-oidc-session
-    # Assume Target Account Role
-    - name: Assume Target Account Role
+        audience: sts.amazonaws.com
+        output-env-credentials: true
+    # Assume Target Account Role via STS role chaining (NO OIDC)
+    - name: Assume Target Account Role (STS role chaining)
       id: assume_target
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: arn:aws:iam::${{ inputs.target_account_id }}:role/iamr-${{ inputs.tower }}-${{ inputs.environment }}-deploy
         aws-region: ${{ inputs.region }}
         role-session-name: target-oidc-session
+        role-chaining: true
+        output-env-credentials: true

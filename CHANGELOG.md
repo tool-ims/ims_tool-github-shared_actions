@@ -1,3 +1,9 @@
+## v1.0.10
+
+- PR_NUMBER=31
+- updated auth action
+- updated auth action
+
 ## v1.0.9
 
 - PR_NUMBER=29

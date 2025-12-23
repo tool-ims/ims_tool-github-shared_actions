@@ -1,3 +1,9 @@
+## v1.0.12
+
+- PR_NUMBER=33
+- updated action
+- updated action
+
 ## v1.0.11
 
 - PR_NUMBER=32

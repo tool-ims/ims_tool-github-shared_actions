@@ -18,13 +18,18 @@ inputs:
     description: Optional backend config file to pass to terraform init
     required: true
     default: ""
+  
+  github_token:
+    description: GitHub token used to configure git for private module access using Github Apps.
+    required: true
+
 runs:
   using: composite
   steps:
     - name: Configure Git for private modules
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ input.github_token }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
       run: |
         set -euo pipefail

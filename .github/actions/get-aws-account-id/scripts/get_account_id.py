@@ -9,15 +9,18 @@ Behavior:
 - Reads mappings/aws-accounts-mapping.json
 - Returns account_id to stdout
 - Fails hard if mapping is missing or invalid
+- Prints execution/debug logs (human-readable)
 """
 
 import json
 import sys
 from pathlib import Path
 
+def log(message: str) -> None:
+    print(f"[get-aws-account-id] {message}", file=sys.stderr)
 
 def fail(message: str) -> None:
-    print(f"ERROR: {message}", file=sys.stderr)
+    log(f"ERROR: {message}")
     sys.exit(1)
 
 
@@ -28,9 +31,14 @@ def main() -> None:
     tower = sys.argv[1]
     environment = sys.argv[2]
 
+    log(f"Resolving AWS account ID")
+    log(f"Tower       : {tower}")
+    log(f"Environment : {environment}")
+
     # Resolve repo root (action/scripts/ -> repo root)
     action_dir = Path(__file__).resolve().parents[1]
     mapping_file = action_dir / "mappings" / "aws-accounts-mapping.json"
+    log(f"Using mapping file: {mapping_file}")
 
     if not mapping_file.exists():
         fail(f"Mapping file not found: {mapping_file}")
@@ -45,16 +53,16 @@ def main() -> None:
         account_id = data[tower][environment]["account_id"]
     except KeyError:
         fail(
-            f"No AWS account mapping found "
-            f"(tower='{tower}', environment='{environment}')"
+            f"No AWS account mapping found for"
+            f"tower='{tower}', environment='{environment}'"
         )
 
     if not account_id:
         fail(
-            f"Empty account_id value "
-            f"(tower='{tower}', environment='{environment}')"
+            f"Empty account_id for "
+            f"tower='{tower}', environment='{environment}'"
         )
-
+    log(f"Resolved account_id: {account_id}")
     print(account_id)
 
 

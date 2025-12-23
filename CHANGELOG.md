@@ -1,3 +1,9 @@
+## v1.0.11
+
+- PR_NUMBER=32
+- updated setup
+- updated setup
+
 ## v1.0.10
 
 - PR_NUMBER=31

@@ -3,7 +3,6 @@ description: >
   Prepare a repository for Terraform execution: configure Git for private modules,
   run formatting checks, initialize Terraform, and validate configuration.
 author: Terraform Tooling Team
-
 inputs:
   working_directory:
     description: Directory containing Terraform configuration
@@ -14,19 +13,25 @@ inputs:
     description: Optional backend config file to pass to terraform init
     required: true
     default: ""
-
 runs:
   using: composite
   steps:
     - name: Configure Git for private modules
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
       run: |
         set -euo pipefail
-        if [ -n "${GITHUB_TOKEN:-}" ]; then
-          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        if [ -z "${GITHUB_TOKEN:-}" ]; then
+          echo "ERROR: GITHUB_TOKEN not provided"
+          exit 1
         fi
+        # Normalize host (github.com OR an enterprise url)
+        GIT_HOST="$(echo "${GITHUB_SERVER_URL}" | sed 's|https://||')"
+        echo "Configuring git auth for host: ${GIT_HOST}"
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@${GIT_HOST}/".insteadOf "https://${GIT_HOST}/"
+
 
     - name: Terraform fmt check
       shell: bash

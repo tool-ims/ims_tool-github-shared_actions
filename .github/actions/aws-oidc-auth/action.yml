@@ -30,7 +30,7 @@ runs:
     - name: Assume Org Account Role
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::390403857119:role/iamr-${{ inputs.tower }}-${{ inputs.environment }}-deploy
+        role-to-assume: arn:aws:iam::302263080338:role/iamr-${{ inputs.tower }}-${{ inputs.environment }}-deploy
         aws-region: ${{ inputs.region }}
         role-session-name: org-oidc-session
     # Assume Target Account Role
